@@ -10,8 +10,11 @@ const rootRoute = createRootRoute({ component: Outlet })
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: () => {
-    const projectId = lastProjectId() ?? listProjects()[0]?.id ?? createProject(i18n.t('projects.defaultName')).id
+  beforeLoad: async () => {
+    const last = lastProjectId()
+    const projects = await listProjects()
+    const existing = projects.find((p) => p.id === last) ?? projects[0]
+    const projectId = existing?.id ?? (await createProject(i18n.t('projects.defaultName'))).id
     throw redirect({ to: '/editor/$projectId', params: { projectId }, replace: true })
   },
 })

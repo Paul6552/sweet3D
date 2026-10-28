@@ -2,7 +2,7 @@ import { catalogApi, type CatalogPiece } from '../api/catalog'
 import { exportSh3d } from '../io/sh3dExport'
 import { importSh3d, projectNameFromFile, Sh3dImportError } from '../io/sh3dImport'
 import type { Home } from '../model/home'
-import { createProject, isQuotaError, type ProjectSummary } from '../storage/projects'
+import { createProject, isQuotaError, requestPersistentStorage, type ProjectSummary } from '../storage/projects'
 
 async function catalogPieces(language: string): Promise<CatalogPiece[]> {
   const catalog = await catalogApi.furniture(language)
@@ -30,8 +30,9 @@ export type ImportOutcome =
 export async function importSh3dFile(file: File, language: string): Promise<ImportOutcome> {
   try {
     const [data, catalog] = await Promise.all([file.arrayBuffer(), catalogPieces(language)])
-    const { home, skippedLevels, missingModels } = importSh3d(new Uint8Array(data), catalog)
-    const project = createProject(projectNameFromFile(file.name), home)
+    const { home, contents, skippedLevels, missingModels } = await importSh3d(new Uint8Array(data), catalog)
+    requestPersistentStorage()
+    const project = await createProject(projectNameFromFile(file.name), home, contents)
     return { ok: true, project, skippedLevels, missingModels }
   } catch (error) {
     if (error instanceof Sh3dImportError) return { ok: false, error: error.reason }

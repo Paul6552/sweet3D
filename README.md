@@ -1,12 +1,12 @@
 # Sweet3D
 
 Web-Version von [Sweet Home 3D](https://www.sweethome3d.com), die komplett im Browser läuft:
-kein Server, kein Login, keine Datenbank. Projekte liegen im `localStorage` des Browsers und lassen sich als
+kein Server, kein Login, keine Datenbank. Projekte liegen in der IndexedDB des Browsers und lassen sich als
 `.sh3d` herunterladen und mit der Desktop-App austauschen.
 
 | Ordner | Inhalt |
 |---|---|
-| `frontend/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP) |
+| `frontend/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP), idb (IndexedDB) |
 | `frontend/vendor/sh3d/` | `Furniture.jar`, `Textures.jar`, `SweetHome3D.jar` aus der Sweet Home 3D 7.5 Distribution |
 | `frontend/scripts/build-catalog.mjs` | erzeugt daraus den Katalog als statische Dateien in `frontend/public/catalog` |
 
@@ -38,8 +38,9 @@ docker compose up -d --build   # http://localhost:8180
 
 - Beim Öffnen startet direkt der Editor mit dem zuletzt bearbeiteten Projekt (beim ersten Mal mit einem neuen).
 - Über das Ordner-Symbol oben links: Projekte anlegen, öffnen, umbenennen, duplizieren, löschen und `.sh3d` importieren.
-- Änderungen werden automatisch im Browser gespeichert. Der `localStorage` fasst je nach Browser etwa 5 MB;
-  die Belegung steht im Projektdialog. Ist er voll, erscheint ein Hinweis.
+- Änderungen werden automatisch im Browser gespeichert (IndexedDB). Importierte Modelle liegen dort als Dateien;
+  der Browser erlaubt meist einen großen Teil des freien Plattenplatzes. Belegung und verfügbarer Platz stehen im
+  Projektdialog. Der `localStorage` (nur etwa 5 MB) wird nur noch für kleine Einstellungen genutzt.
 - Herunterladen als `.sh3d` über das Download-Symbol in der Werkzeugleiste oder im Projektdialog.
   Die Datei enthält `Home.xml` und die Modelle und öffnet sich in Sweet Home 3D ab Version 5.3.
 - Import: Dateien aus Sweet Home 3D ab 5.3. Möbel aus dem Standardkatalog nutzen dessen Modelle, andere Modelle

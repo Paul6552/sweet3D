@@ -21,7 +21,7 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from '@tanstack/react-router'
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNotify } from '../editor/useNotify'
 import {
@@ -32,11 +32,16 @@ import {
   isQuotaError,
   listProjects,
   renameProject,
-  usedStorage,
+  storageEstimate,
   type ProjectSummary,
 } from '../storage/projects'
 import { useEditorStore } from '../store/editorStore'
 import { downloadSh3d, importSh3dFile } from './projectFiles'
+
+const readSnapshot = async () => {
+  const [projects, storage] = await Promise.all([listProjects(), storageEstimate()])
+  return { projects, storage }
+}
 
 type NameDialog = { mode: 'create' } | { mode: 'rename'; project: ProjectSummary }
 
@@ -55,7 +60,8 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
   const { t, i18n } = useTranslation()
   const notify = useNotify()
   const navigate = useNavigate()
-  const [{ projects, used }, setSnapshot] = useState(() => ({ projects: listProjects(), used: usedStorage() }))
+  const [snapshot, setSnapshot] = useState<{ projects: ProjectSummary[]; storage: { usage: number; quota: number } | null } | null>(null)
+  const projects = snapshot?.projects ?? []
   const [nameDialog, setNameDialog] = useState<NameDialog | null>(null)
   const [name, setName] = useState('')
   const [toDelete, setToDelete] = useState<ProjectSummary | null>(null)
@@ -63,20 +69,29 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
   const fileInput = useRef<HTMLInputElement>(null)
   const language = i18n.resolvedLanguage ?? 'de'
 
-  const refresh = () => setSnapshot({ projects: listProjects(), used: usedStorage() })
+  const refresh = useCallback(() => readSnapshot().then(setSnapshot), [])
+
+  useEffect(() => {
+    let cancelled = false
+    void readSnapshot().then((next) => !cancelled && setSnapshot(next))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const openProject = (id: string) => {
     onClose()
     if (id !== currentId) void navigate({ to: '/editor/$projectId', params: { projectId: id } })
   }
 
-  const run = (action: () => void) => {
+  const run = async (action: () => Promise<unknown>) => {
     try {
-      action()
+      await action()
     } catch (error) {
+      console.error(error)
       notify(isQuotaError(error) ? t('projects.importErrors.quota') : String(error))
     }
-    refresh()
+    await refresh()
   }
 
   const showNameDialog = (next: NameDialog) => {
@@ -88,38 +103,38 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
     if (!nameDialog || !name.trim()) return
     const dialog = nameDialog
     setNameDialog(null)
-    run(() => {
+    void run(async () => {
       if (dialog.mode === 'create') {
-        openProject(createProject(name).id)
+        openProject((await createProject(name)).id)
       } else {
-        renameProject(dialog.project.id, name)
+        await renameProject(dialog.project.id, name)
         if (dialog.project.id === currentId) onRenamed(name.trim())
       }
     })
   }
 
   const duplicate = (project: ProjectSummary) =>
-    run(() => {
+    void run(() => {
       const copyName = t('projects.copyName', { name: project.name })
       // Das geöffnete Projekt mit dem aktuellen, evtl. noch nicht gespeicherten Stand kopieren
-      const home = project.id === currentId ? useEditorStore.getState().home : null
-      if (home) createProject(copyName, home)
-      else duplicateProject(project.id, copyName)
+      const home = project.id === currentId ? (useEditorStore.getState().home ?? undefined) : undefined
+      return duplicateProject(project.id, copyName, home)
     })
 
   const confirmDelete = () => {
     if (!toDelete) return
     const deleted = toDelete
     setToDelete(null)
-    run(() => deleteProject(deleted.id))
-    if (deleted.id === currentId) {
-      onClose()
-      void navigate({ to: '/', replace: true })
-    }
+    void run(() => deleteProject(deleted.id)).then(() => {
+      if (deleted.id === currentId) {
+        onClose()
+        void navigate({ to: '/', replace: true })
+      }
+    })
   }
 
   const download = async (project: ProjectSummary) => {
-    const home = project.id === currentId ? useEditorStore.getState().home : getProject(project.id)?.home
+    const home = project.id === currentId ? useEditorStore.getState().home : (await getProject(project.id))?.home
     if (!home) return
     try {
       await downloadSh3d(home, project.name, language)
@@ -145,7 +160,9 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
   }
 
   const dateFormat = new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' })
-  const megabytes = new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(used / 1024 / 1024)
+  const sizeFormat = new Intl.NumberFormat(language, { maximumFractionDigits: 1 })
+  const formatSize = (bytes: number) =>
+    bytes >= 1024 ** 3 ? `${sizeFormat.format(bytes / 1024 ** 3)} GB` : `${sizeFormat.format(bytes / 1024 ** 2)} MB`
 
   return (
     <>
@@ -197,7 +214,8 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
             ))}
           </List>
           <Typography variant="caption" color="text.secondary" component="p" sx={{ px: 3, py: 1.5 }}>
-            {t('projects.hint')} {t('projects.storage', { used: `${megabytes} MB` })}
+            {t('projects.hint')}{' '}
+            {snapshot?.storage && t('projects.storage', { used: formatSize(snapshot.storage.usage), quota: formatSize(snapshot.storage.quota) })}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'space-between' }}>

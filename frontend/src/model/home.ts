@@ -40,7 +40,7 @@ export interface HomePiece {
   depth: number
   height: number
   visible: boolean
-  /** URL eines Katalogmodells oder Verweis auf importierten Inhalt, siehe {@link Home.contents}. */
+  /** URL eines Katalogmodells oder Verweis „content:…“ auf importierten Inhalt, siehe model/contents.ts. */
   model: string | null
   modelRotation: number[][] | null
   icon: string | null
@@ -88,11 +88,6 @@ export interface Home {
   rooms: Room[]
   furniture: HomePiece[]
   camera: { mode: CameraMode; observer: ObserverCamera }
-  /**
-   * Aus .sh3d-Dateien importierte Modelle und Symbole, die nicht im Katalog sind, als Data-URLs.
-   * Möbel verweisen darauf mit „content:<Schlüssel>“, siehe model/contents.ts.
-   */
-  contents: Record<string, string>
 }
 
 export function createEmptyHome(): Home {
@@ -106,7 +101,6 @@ export function createEmptyHome(): Home {
       mode: 'aerial',
       observer: { x: 50, y: 50, z: 170, yaw: Math.PI / 4, pitch: 0, fieldOfView: (63 * Math.PI) / 180 },
     },
-    contents: {},
   }
 }
 
@@ -121,7 +115,6 @@ export function normalizeHome(raw: unknown): Home {
     rooms: home.rooms ?? [],
     furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null })),
     camera: home.camera ?? empty.camera,
-    contents: home.contents ?? {},
   }
 }
 

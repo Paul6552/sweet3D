@@ -1,6 +1,7 @@
-import { strToU8, zipSync } from 'fflate'
+import { strToU8, zip } from 'fflate'
 import { catalogApi, type CatalogPiece } from '../api/catalog'
-import { CONTENT_PREFIX, dataUrlToBytes, isContentRef } from '../model/contents'
+import { contentKey, isContentRef } from '../model/contents'
+import { contentBlobs } from '../storage/contents'
 import type { Home, HomePiece } from '../model/home'
 import { fromObserverPitch, fromObserverYaw } from './sh3dCamera'
 
@@ -32,20 +33,16 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
     if (!name) {
       name = (async () => {
         if (isContentRef(ref)) {
-          const key = ref.slice(CONTENT_PREFIX.length)
+          const key = contentKey(ref)
           const slash = key.indexOf('/')
-          if (slash < 0) {
-            if (!home.contents[key]) return null
-            const entry = String(next++)
-            entries[entry] = dataUrlToBytes(home.contents[key])
-            return entry
-          }
-          const directory = `${next++}/`
           const prefix = key.slice(0, slash + 1)
-          for (const [k, url] of Object.entries(home.contents)) {
-            if (k.startsWith(prefix)) entries[directory + k.slice(prefix.length)] = dataUrlToBytes(url)
+          const blobs = await contentBlobs(slash < 0 ? key : prefix, slash >= 0)
+          if (blobs.length === 0) return null
+          const target = slash < 0 ? String(next++) : `${next++}/`
+          for (const [k, blob] of blobs) {
+            entries[slash < 0 ? target : target + k.slice(prefix.length)] = new Uint8Array(await blob.arrayBuffer())
           }
-          return directory + key.slice(slash + 1)
+          return slash < 0 ? target : target + key.slice(slash + 1)
         }
         const base = ref.slice(0, ref.lastIndexOf('/') + 1)
         const parts = modelParts[base]
@@ -112,7 +109,11 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
     '',
   ].join('\n')
 
-  return new Blob([zipSync({ 'Home.xml': strToU8(xml), ...entries }) as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' })
+  // Packt in Hintergrund-Threads; Bilder und Modelle sind oft schon komprimiert
+  const zipped = await new Promise<Uint8Array>((resolve, reject) =>
+    zip({ 'Home.xml': strToU8(xml), ...entries }, { level: 6 }, (error, data) => (error ? reject(error) : resolve(data))),
+  )
+  return new Blob([zipped as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' })
 }
 
 async function pieceXml(piece: HomePiece, catalogPiece: CatalogPiece | undefined, content: (ref: string | null) => Promise<string | null>): Promise<string> {

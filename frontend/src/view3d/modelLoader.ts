@@ -1,7 +1,8 @@
 import { Box3, DoubleSide, Group, LoadingManager, Material, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
-import { resolveRef } from '../model/contents'
+import { CONTENT_PREFIX, contentKey, isContentRef } from '../model/contents'
+import { contentUrl, contentUrlsWithPrefix } from '../storage/contents'
 
 type MaterialCreator = ReturnType<MTLLoader['parse']>
 
@@ -26,11 +27,11 @@ function loadDefaultMaterials(): Promise<MaterialCreator> {
  * {@code ref} ist eine Katalog-URL oder ein Verweis auf importierten Inhalt; dessen Schlüssel
  * sind eindeutig, daher taugt der Verweis auch als Cache-Schlüssel.
  */
-function loadObj(ref: string, contents: Record<string, string>): Promise<Group> {
+function loadObj(ref: string): Promise<Group> {
   let model = models.get(ref)
   if (!model) {
     model = (async () => {
-      const resolve = (url: string) => resolveRef(contents, url) ?? url
+      const resolve = await resolverFor(ref)
       const base = ref.substring(0, ref.lastIndexOf('/') + 1)
       const [text, defaults] = await Promise.all([fetch(resolve(ref)).then((r) => r.text()), loadDefaultMaterials()])
       const library = /^mtllib\s+(.+)$/m.exec(text)?.[1]?.trim()
@@ -66,16 +67,34 @@ function loadObj(ref: string, contents: Record<string, string>): Promise<Group> 
 }
 
 /**
+ * Bildet Verweise auf importierte Inhalte auf Object-URLs ab. Bei mehrteiligen Modellen werden
+ * alle Dateien vorab aufgelöst, da der LoadingManager die URLs synchron umschreibt.
+ */
+async function resolverFor(ref: string): Promise<(url: string) => string> {
+  if (!isContentRef(ref)) return (url) => url
+  const key = contentKey(ref)
+  const slash = key.indexOf('/')
+  const urls = new Map<string, string>()
+  if (slash < 0) {
+    const url = await contentUrl(key)
+    if (url) urls.set(ref, url)
+  } else {
+    for (const [k, url] of await contentUrlsWithPrefix(key.slice(0, slash + 1))) urls.set(CONTENT_PREFIX + k, url)
+  }
+  if (!urls.has(ref)) throw new Error(`Inhalt ${ref} fehlt`)
+  return (url) => urls.get(url) ?? url
+}
+
+/**
  * Modell für ein Möbel wie in Sweet Home 3D (ModelManager): Modellrotation anwenden, dann so
  * skalieren, dass es genau width × height × depth einnimmt, unten mittig am Ursprung.
  */
 export async function loadNormalizedModel(
   ref: string,
-  contents: Record<string, string>,
   modelRotation: number[][] | null,
   size: { width: number; height: number; depth: number },
 ): Promise<Object3D> {
-  const source = await loadObj(ref, contents)
+  const source = await loadObj(ref)
   const rotated = new Group()
   const clone = source.clone(true)
   if (modelRotation) {

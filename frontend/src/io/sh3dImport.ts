@@ -1,11 +1,13 @@
-import { strFromU8, unzipSync } from 'fflate'
+import { strFromU8, unzip, type Unzipped } from 'fflate'
 import type { CatalogPiece } from '../api/catalog'
-import { bytesToDataUrl, CONTENT_PREFIX, guessMime } from '../model/contents'
+import { CONTENT_PREFIX, guessMime } from '../model/contents'
 import { createEmptyHome, type DoorOrWindowInfo, type Home, type HomePiece, type Room, type Wall } from '../model/home'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
 
 export interface ImportResult {
   home: Home
+  /** Importierte Modelle und Symbole für IndexedDB, Schlüssel wie in „content:<Schlüssel>“. */
+  contents: Record<string, Blob>
   /** Hinweise für den Nutzer: Anzahl übersprungener Ebenen, Möbel ohne ladbares Modell. */
   skippedLevels: number
   missingModels: number
@@ -25,12 +27,13 @@ const FURNITURE_ELEMENTS = new Set(['pieceOfFurniture', 'doorOrWindow', 'light']
 /**
  * Liest eine .sh3d-Datei über ihren Eintrag Home.xml (Sweet Home 3D ab 5.3). Möbel aus dem
  * Standardkatalog verweisen auf dessen Modelle; alle anderen Modelle und Symbole werden als
- * Data-URLs in {@link Home.contents} übernommen. Bei mehreren Ebenen wird nur die unterste gelesen.
+ * Blobs übernommen. Bei mehreren Ebenen wird nur die unterste gelesen.
  */
-export function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): ImportResult {
-  let files: Record<string, Uint8Array>
+export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Promise<ImportResult> {
+  let files: Unzipped
   try {
-    files = unzipSync(data)
+    // Entpackt in Hintergrund-Threads, damit große Dateien die Oberfläche nicht blockieren
+    files = await new Promise<Unzipped>((resolve, reject) => unzip(data, (error, result) => (error ? reject(error) : resolve(result))))
   } catch {
     throw new Sh3dImportError('notZip')
   }
@@ -41,6 +44,8 @@ export function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): ImportRes
 
   const byCatalogId = new Map(catalog.map((p) => [p.id, p]))
   const home = createEmptyHome()
+  const contents: Record<string, Blob> = {}
+  const toBlob = (bytes: Uint8Array, name: string) => new Blob([bytes as Uint8Array<ArrayBuffer>], { type: guessMime(bytes, name) })
   home.wallHeight = num(root, 'wallHeight') ?? home.wallHeight
 
   // Nur die unterste Ebene; Elemente ohne Ebene gehören zu ihr
@@ -58,14 +63,14 @@ export function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): ImportRes
     const slash = name.indexOf('/')
     if (slash < 0) {
       if (files[name]) {
-        home.contents[id] = bytesToDataUrl(files[name], guessMime(files[name], name))
+        contents[id] = toBlob(files[name], name)
         ref = CONTENT_PREFIX + id
       }
     } else {
       const directory = name.slice(0, slash + 1)
       for (const [entry, bytes] of Object.entries(files)) {
         if (entry.startsWith(directory) && !entry.endsWith('/')) {
-          home.contents[`${id}/${entry.slice(directory.length)}`] = bytesToDataUrl(bytes, guessMime(bytes, entry))
+          contents[`${id}/${entry.slice(directory.length)}`] = toBlob(bytes, entry)
         }
       }
       if (files[name]) ref = `${CONTENT_PREFIX}${id}/${name.slice(slash + 1)}`
@@ -161,7 +166,7 @@ export function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): ImportRes
   }
   home.camera.mode = root.getAttribute('camera') === 'observerCamera' ? 'observer' : 'aerial'
 
-  return { home, skippedLevels: Math.max(0, levels.length - 1), missingModels }
+  return { home, contents, skippedLevels: Math.max(0, levels.length - 1), missingModels }
 }
 
 function doorInfo(e: Element): DoorOrWindowInfo {

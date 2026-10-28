@@ -5,9 +5,12 @@ import { useEditorStore } from '../store/editorStore'
 
 export type SaveState = 'saved' | 'pending' | 'error'
 
-const DEBOUNCE_MS = 400
+const DEBOUNCE_MS = 300
 
-/** Speichert Änderungen am Projekt verzögert im localStorage, spätestens beim Schließen des Tabs. */
+/**
+ * Speichert Änderungen am Projekt verzögert in IndexedDB. Spätestens beim Verbergen oder Schließen
+ * des Tabs wird gespeichert, da IndexedDB asynchron schreibt.
+ */
 export function useAutosave(projectId: string | null): SaveState {
   const [state, setState] = useState<SaveState>('saved')
 
@@ -18,16 +21,20 @@ export function useAutosave(projectId: string | null): SaveState {
 
     const save = () => {
       window.clearTimeout(timer)
-      if (!pending) return
-      try {
-        saveHome(projectId, pending)
-        pending = null
-        setState('saved')
-      } catch (error) {
-        // Meist ist der Speicher voll (QuotaExceededError); der Stand bleibt zum nächsten Versuch vorgemerkt
-        console.error('Speichern fehlgeschlagen', error)
-        setState('error')
-      }
+      const home = pending
+      if (!home) return
+      pending = null
+      saveHome(projectId, home).then(
+        () => {
+          if (!pending) setState('saved')
+        },
+        (error: unknown) => {
+          console.error('Speichern fehlgeschlagen', error)
+          // Stand für den nächsten Versuch vormerken, sofern es keinen neueren gibt
+          pending ??= home
+          setState('error')
+        },
+      )
     }
 
     const unsubscribe = useEditorStore.subscribe((current, previous) => {
@@ -37,10 +44,15 @@ export function useAutosave(projectId: string | null): SaveState {
       window.clearTimeout(timer)
       timer = window.setTimeout(save, DEBOUNCE_MS)
     })
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') save()
+    }
+    document.addEventListener('visibilitychange', onHide)
     window.addEventListener('pagehide', save)
 
     return () => {
       unsubscribe()
+      document.removeEventListener('visibilitychange', onHide)
       window.removeEventListener('pagehide', save)
       save()
     }

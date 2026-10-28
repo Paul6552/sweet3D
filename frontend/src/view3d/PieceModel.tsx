@@ -2,10 +2,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import { useEffect, useState } from 'react'
 import { BoxGeometry, type Object3D } from 'three'
 import type { HomePiece } from '../model/home'
-import { useEditorStore } from '../store/editorStore'
 import { loadNormalizedModel } from './modelLoader'
-
-const NO_CONTENTS: Record<string, string> = {}
 
 interface PieceModelProps {
   piece: HomePiece
@@ -20,21 +17,20 @@ interface PieceModelProps {
  */
 export function PieceModel({ piece, selected, selectionColor, onSelect }: PieceModelProps) {
   const [loaded, setLoaded] = useState<{ key: string; object: Object3D } | null>(null)
-  const contents = useEditorStore((s) => s.home?.contents ?? NO_CONTENTS)
   const { model, modelRotation, width, height, depth } = piece
   const key = JSON.stringify([model, modelRotation, width, height, depth])
 
   useEffect(() => {
     if (!model) return
     let cancelled = false
-    loadNormalizedModel(model, contents, modelRotation, { width, height, depth }).then(
+    loadNormalizedModel(model, modelRotation, { width, height, depth }).then(
       (object) => !cancelled && setLoaded({ key, object }),
       () => {},
     )
     return () => {
       cancelled = true
     }
-  }, [key, model, contents, modelRotation, width, height, depth])
+  }, [key, model, modelRotation, width, height, depth])
 
   const object = loaded?.key === key ? loaded.object : null
   return (

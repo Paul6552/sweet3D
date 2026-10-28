@@ -1,89 +1,104 @@
+import { contentId, dataUrlToBytes, guessMime, isContentRef } from '../model/contents'
 import { createEmptyHome, normalizeHome, type Home } from '../model/home'
+import { openDatabase, type ProjectSummary } from './db'
 
-/**
- * Projekte im localStorage des Browsers: ein Index mit Namen und Zeitstempeln und je Projekt
- * ein Eintrag mit dem Inhalt. Der localStorage fasst je nach Browser etwa 5 MB.
- */
-export interface ProjectSummary {
-  id: string
-  name: string
-  createdAt: string
-  updatedAt: string
-}
+export type { ProjectSummary } from './db'
 
-const INDEX_KEY = 'sweet3d:projects'
 const LAST_KEY = 'sweet3d:last-project'
-const homeKey = (id: string) => `sweet3d:project:${id}`
 
-function readIndex(): ProjectSummary[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(INDEX_KEY) ?? '[]')
-    return Array.isArray(parsed) ? (parsed as ProjectSummary[]) : []
-  } catch {
-    return []
-  }
-}
+let migrated: Promise<void> | null = null
 
-function writeIndex(index: ProjectSummary[]) {
-  localStorage.setItem(INDEX_KEY, JSON.stringify(index))
-}
-
-function updateSummary(id: string, change: Partial<ProjectSummary>) {
-  writeIndex(readIndex().map((p) => (p.id === id ? { ...p, ...change } : p)))
+/** Datenbank, vorher einmalig Projekte aus der früheren localStorage-Ablage übernehmen. */
+async function database() {
+  migrated ??= migrateFromLocalStorage()
+  await migrated
+  return openDatabase()
 }
 
 /** Alle Projekte, zuletzt geänderte zuerst. */
-export function listProjects(): ProjectSummary[] {
-  return readIndex().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const projects = await (await database()).getAll('projects')
+  return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
-export function getProject(id: string): { summary: ProjectSummary; home: Home } | null {
-  const summary = readIndex().find((p) => p.id === id)
-  const raw = localStorage.getItem(homeKey(id))
-  if (!summary || raw === null) return null
-  return { summary, home: normalizeHome(JSON.parse(raw)) }
+export async function getProject(id: string): Promise<{ summary: ProjectSummary; home: Home } | null> {
+  const db = await database()
+  const [summary, home] = await Promise.all([db.get('projects', id), db.get('homes', id)])
+  return summary && home ? { summary, home: normalizeHome(home) } : null
 }
 
-/** Legt ein Projekt an. Wirft bei vollem Speicher (QuotaExceededError), ohne etwas anzulegen. */
-export function createProject(name: string, home: Home = createEmptyHome()): ProjectSummary {
+/**
+ * Legt ein Projekt samt importierter Dateien in einer Transaktion an. Wirft bei zu wenig
+ * Speicherplatz (QuotaExceededError), ohne etwas anzulegen.
+ */
+export async function createProject(name: string, home: Home = createEmptyHome(), contents: Record<string, Blob> = {}): Promise<ProjectSummary> {
+  const db = await database()
   const now = new Date().toISOString()
-  const summary: ProjectSummary = { id: crypto.randomUUID(), name: uniqueName(name), createdAt: now, updatedAt: now }
-  localStorage.setItem(homeKey(summary.id), JSON.stringify(home))
-  try {
-    writeIndex([...readIndex(), summary])
-  } catch (error) {
-    localStorage.removeItem(homeKey(summary.id))
-    throw error
-  }
+  const summary: ProjectSummary = { id: crypto.randomUUID(), name: uniqueName(name, await db.getAll('projects')), createdAt: now, updatedAt: now }
+  const tx = db.transaction(['projects', 'homes', 'contents'], 'readwrite')
+  await Promise.all([
+    ...Object.entries(contents).map(([key, blob]) => tx.objectStore('contents').put(blob, key)),
+    tx.objectStore('homes').put(home, summary.id),
+    tx.objectStore('projects').put(summary),
+    tx.done,
+  ])
   return summary
 }
 
-/** Speichert den Inhalt eines Projekts. Wirft bei vollem Speicher (QuotaExceededError). */
-export function saveHome(id: string, home: Home) {
-  // Ein inzwischen gelöschtes Projekt nicht durch verzögertes Speichern wieder anlegen
-  if (!readIndex().some((p) => p.id === id)) return
-  localStorage.setItem(homeKey(id), JSON.stringify(home))
-  updateSummary(id, { updatedAt: new Date().toISOString() })
+/** Speichert den Inhalt eines Projekts; ein inzwischen gelöschtes Projekt wird nicht wieder angelegt. */
+export async function saveHome(id: string, home: Home) {
+  const db = await database()
+  const tx = db.transaction(['projects', 'homes'], 'readwrite')
+  const summary = await tx.objectStore('projects').get(id)
+  if (summary) {
+    await Promise.all([
+      tx.objectStore('homes').put(home, id),
+      tx.objectStore('projects').put({ ...summary, updatedAt: new Date().toISOString() }),
+    ])
+  }
+  await tx.done
 }
 
-export function renameProject(id: string, name: string) {
-  updateSummary(id, { name: name.trim() })
+export async function renameProject(id: string, name: string) {
+  const db = await database()
+  const summary = await db.get('projects', id)
+  if (summary) await db.put('projects', { ...summary, name: name.trim() })
 }
 
-export function duplicateProject(id: string, name: string): ProjectSummary | null {
-  const project = getProject(id)
-  return project ? createProject(name, project.home) : null
+/** Kopie mit demselben Inhalt; importierte Dateien werden gemeinsam genutzt. */
+export async function duplicateProject(id: string, name: string, home?: Home): Promise<ProjectSummary | null> {
+  const source = home ?? (await getProject(id))?.home
+  return source ? createProject(name, source) : null
 }
 
-export function deleteProject(id: string) {
-  localStorage.removeItem(homeKey(id))
-  writeIndex(readIndex().filter((p) => p.id !== id))
+export async function deleteProject(id: string) {
+  const db = await database()
+  const tx = db.transaction(['projects', 'homes'], 'readwrite')
+  await Promise.all([tx.objectStore('projects').delete(id), tx.objectStore('homes').delete(id), tx.done])
   if (localStorage.getItem(LAST_KEY) === id) localStorage.removeItem(LAST_KEY)
+  await removeUnusedContents()
+}
+
+/** Löscht importierte Dateien, auf die kein Projekt mehr verweist. */
+async function removeUnusedContents() {
+  const db = await database()
+  const used = new Set<string>()
+  for (const home of await db.getAll('homes')) {
+    for (const piece of home.furniture) {
+      for (const ref of [piece.model, piece.icon, piece.planIcon]) {
+        if (ref && isContentRef(ref)) used.add(contentId(ref))
+      }
+    }
+  }
+  const tx = db.transaction('contents', 'readwrite')
+  for (const key of await tx.store.getAllKeys()) {
+    if (!used.has(key.split('/')[0])) await tx.store.delete(key)
+  }
+  await tx.done
 }
 
 export function lastProjectId(): string | null {
-  const id = localStorage.getItem(LAST_KEY)
-  return id && readIndex().some((p) => p.id === id) ? id : null
+  return localStorage.getItem(LAST_KEY)
 }
 
 export function setLastProject(id: string) {
@@ -91,25 +106,53 @@ export function setLastProject(id: string) {
 }
 
 /** Hängt bei Namensgleichheit eine Nummer an: „Neues Projekt 2“. */
-export function uniqueName(name: string): string {
+function uniqueName(name: string, projects: ProjectSummary[]): string {
   const base = name.trim() || 'Sweet3D'
-  const names = new Set(readIndex().map((p) => p.name))
+  const names = new Set(projects.map((p) => p.name))
   if (!names.has(base)) return base
   let n = 2
   while (names.has(`${base} ${n}`)) n++
   return `${base} ${n}`
 }
 
-/** Belegter Speicher aller Sweet3D-Einträge in Zeichen (UTF-16), grob als Byte-Angabe nutzbar. */
-export function usedStorage(): number {
-  let total = 0
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (key?.startsWith('sweet3d:')) total += key.length + (localStorage.getItem(key)?.length ?? 0)
-  }
-  return total
+/** Belegter und verfügbarer Speicher dieser Seite laut Browser (in Bytes). */
+export async function storageEstimate(): Promise<{ usage: number; quota: number } | null> {
+  const estimate = await navigator.storage?.estimate?.()
+  return estimate?.usage !== undefined && estimate.quota !== undefined ? { usage: estimate.usage, quota: estimate.quota } : null
+}
+
+/** Bittet den Browser, die Daten nicht bei Platzmangel automatisch zu löschen. */
+export function requestPersistentStorage() {
+  void navigator.storage?.persist?.().catch(() => false)
 }
 
 export function isQuotaError(error: unknown): boolean {
   return error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)
+}
+
+/**
+ * Übernimmt Projekte der früheren localStorage-Ablage (Index „sweet3d:projects“, Inhalte
+ * „sweet3d:project:<id>“ mit importierten Dateien als Data-URLs) und entfernt sie dort.
+ */
+async function migrateFromLocalStorage() {
+  const index = localStorage.getItem('sweet3d:projects')
+  if (index === null) return
+  const db = await openDatabase()
+  for (const summary of JSON.parse(index) as ProjectSummary[]) {
+    const raw = localStorage.getItem(`sweet3d:project:${summary.id}`)
+    if (raw === null) continue
+    const { contents = {}, ...home } = JSON.parse(raw) as Home & { contents?: Record<string, string> }
+    const tx = db.transaction(['projects', 'homes', 'contents'], 'readwrite')
+    await Promise.all([
+      ...Object.entries(contents).map(([key, url]) => {
+        const bytes = dataUrlToBytes(url)
+        return tx.objectStore('contents').put(new Blob([bytes], { type: guessMime(bytes, key) }), key)
+      }),
+      tx.objectStore('homes').put(normalizeHome(home), summary.id),
+      tx.objectStore('projects').put(summary),
+      tx.done,
+    ])
+    localStorage.removeItem(`sweet3d:project:${summary.id}`)
+  }
+  localStorage.removeItem('sweet3d:projects')
 }

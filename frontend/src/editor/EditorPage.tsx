@@ -58,8 +58,10 @@ export function EditorPage() {
   const notify = useNotify()
   const { projectId } = useParams({ from: '/editor/$projectId' })
   const leaderId = useMemo(() => leaderIdFor(projectId), [projectId])
-  // Nur der Anfangsstand; danach gilt der Editor-Store, den useAutosave zurückschreibt
-  const project = useMemo(() => getProject(projectId), [projectId])
+  // Nur der Anfangsstand; danach gilt der Editor-Store, den useAutosave zurückschreibt.
+  // undefined: wird geladen, null: Projekt existiert nicht (mehr).
+  const [loaded, setLoaded] = useState<{ projectId: string; project: Awaited<ReturnType<typeof getProject>> } | null>(null)
+  const project = loaded?.projectId === projectId ? loaded.project : undefined
   const [renamed, setRenamed] = useState<{ id: string; name: string } | null>(null)
   const name = renamed?.id === projectId ? renamed.name : (project?.summary.name ?? '')
   const [projectsOpen, setProjectsOpen] = useState(false)
@@ -72,6 +74,14 @@ export function EditorPage() {
   const canRedo = useEditorStore((s) => s.canRedo)
   const saveState = useAutosave(project ? projectId : null)
   useShortcuts()
+
+  useEffect(() => {
+    let cancelled = false
+    void getProject(projectId).then((p) => !cancelled && setLoaded({ projectId, project: p }))
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   useEffect(() => {
     if (project) setLastProject(projectId)
@@ -156,10 +166,11 @@ export function EditorPage() {
     }
   }
 
-  if (!project) {
+  if (project === null) {
     // Unbekanntes oder gelöschtes Projekt: zum zuletzt bearbeiteten bzw. einem neuen
     return <Navigate to="/" replace />
   }
+  if (!project) return null
   if (!leader) return null
 
   return (

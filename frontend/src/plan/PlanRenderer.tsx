@@ -5,7 +5,7 @@ import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
 import { polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
-import { resolveRef } from '../model/contents'
+import { useResolvedRef } from '../storage/contents'
 import { useImage } from './useImage'
 
 export interface PlanPreview {
@@ -83,8 +83,8 @@ function Grid({ view, width, height, minor, major }: { view: PlanView; width: nu
   )
 }
 
-function PieceShape({ piece, contents, scale, stroke, selected, selectedColor }: { piece: HomePiece; contents: Record<string, string>; scale: number; stroke: string; selected: boolean; selectedColor: string }) {
-  const image = useImage(resolveRef(contents, piece.planIcon ?? piece.icon))
+function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: HomePiece; scale: number; stroke: string; selected: boolean; selectedColor: string }) {
+  const image = useImage(useResolvedRef(piece.planIcon ?? piece.icon))
   const { width: w, depth: d } = piece
   // Symbol wie in Sweet Home 3D mit erhaltenem Seitenverhältnis einpassen
   const fit = image ? Math.min(w / image.width, d / image.height) : 0
@@ -228,7 +228,6 @@ export function PlanRenderer({ home, selection, view, width, height, preview }: 
         .filter((p) => p.visible)
         .map((piece) => (
           <PieceShape
-            contents={home.contents}
             key={piece.id}
             piece={piece}
             scale={scale}

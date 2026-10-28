@@ -153,7 +153,6 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
       return
     }
     const hints = [t('projects.imported', { name: outcome.project.name })]
-    if (outcome.skippedLevels) hints.push(t('projects.importSkippedLevels', { count: outcome.skippedLevels }))
     if (outcome.missingModels) hints.push(t('projects.importMissingModels', { count: outcome.missingModels }))
     notify(hints.join(' '))
     openProject(outcome.project.id)

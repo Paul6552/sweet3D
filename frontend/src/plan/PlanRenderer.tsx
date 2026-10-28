@@ -25,6 +25,8 @@ interface PlanRendererProps {
   width: number
   height: number
   preview: PlanPreview
+  /** Wände der Ebene darunter, blass zur Orientierung. */
+  wallsBelow?: Wall[]
 }
 
 const flat = (points: Point[]) => points.flat()
@@ -157,7 +159,7 @@ function Observer({ observer, scale, color, paper }: { observer: ObserverCamera;
 }
 
 /** Zeichnet den Plan in Plankoordinaten (cm); Linienbreiten und Schrift bleiben am Bildschirm konstant. */
-export function PlanRenderer({ home, selection, view, width, height, preview }: PlanRendererProps) {
+export function PlanRenderer({ home, selection, view, width, height, preview, wallsBelow }: PlanRendererProps) {
   const theme = useTheme()
   const dark = theme.palette.mode === 'dark'
   const { scale } = view
@@ -166,6 +168,10 @@ export function PlanRenderer({ home, selection, view, width, height, preview }: 
   const hatch = useHatchPattern(dark ? '#9aa0a6' : '#5f6368', dark ? '#3c4043' : '#e8eaed')
   const selected = useMemo(() => new Set(selection), [selection])
   const wallsById = useMemo(() => new Map(home.walls.map((w) => [w.id, w])), [home.walls])
+  const below = useMemo(() => {
+    const byId = new Map((wallsBelow ?? []).map((w) => [w.id, w]))
+    return (wallsBelow ?? []).map((wall) => ({ id: wall.id, polygon: wallPolygon(wall, byId) }))
+  }, [wallsBelow])
   const fontSize = 12 / scale
 
   const wallShape = (wall: Wall, polygon: Point[], isSelected: boolean, dashed = false) => (
@@ -193,6 +199,18 @@ export function PlanRenderer({ home, selection, view, width, height, preview }: 
         minor={dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}
         major={dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}
       />
+
+      {below.map(({ id, polygon }) => (
+        <Line
+          key={`below-${id}`}
+          points={flat(polygon)}
+          closed
+          fill={dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}
+          stroke={dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}
+          strokeWidth={1 / scale}
+          listening={false}
+        />
+      ))}
 
       {home.rooms.map((room) => {
         const [cx, cy] = polygonCentroid(room.points)

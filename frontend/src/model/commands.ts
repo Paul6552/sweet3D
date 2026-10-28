@@ -1,4 +1,5 @@
-import type { Home, HomePiece, Room, Wall } from './home'
+import type { Home, HomePiece, Level, Room, Wall } from './home'
+import { sortLevels } from './levels'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
 
@@ -13,6 +14,14 @@ export type HomeCommand =
   | { type: 'updateFurniture'; changes: Change<HomePiece>[] }
   | { type: 'moveItems'; ids: string[]; dx: number; dy: number }
   | { type: 'deleteItems'; ids: string[] }
+  /**
+   * Ebenen hinzufügen und die letzte auswählen. {@code assignExistingTo}: Ebene, auf die alle
+   * bisherigen Objekte kommen (beim ersten Anlegen von Ebenen).
+   */
+  | { type: 'addLevels'; levels: Level[]; assignExistingTo: string | null }
+  | { type: 'updateLevel'; change: Change<Level> }
+  /** Löscht die Ebene samt ihrer Objekte. */
+  | { type: 'deleteLevel'; id: string }
   /** Mehrere Befehle als ein Undo-Schritt. */
   | { type: 'batch'; commands: HomeCommand[] }
 
@@ -26,11 +35,40 @@ function applyChanges<T extends { id: string }>(items: T[], changes: Change<T>[]
 /** Wendet einen Befehl auf einen immer-Entwurf des Projekts an. */
 export function applyCommand(home: Home, command: HomeCommand): void {
   switch (command.type) {
-    case 'addItems':
-      home.walls.push(...(command.walls ?? []))
-      home.rooms.push(...(command.rooms ?? []))
-      home.furniture.push(...(command.furniture ?? []))
+    case 'addItems': {
+      // Neue Objekte (auch eingefügte) kommen immer auf die gewählte Ebene
+      const level = home.selectedLevel
+      home.walls.push(...(command.walls ?? []).map((w) => ({ ...w, level })))
+      home.rooms.push(...(command.rooms ?? []).map((r) => ({ ...r, level })))
+      home.furniture.push(...(command.furniture ?? []).map((p) => ({ ...p, level })))
       break
+    }
+    case 'addLevels':
+      if (command.assignExistingTo) {
+        for (const item of [...home.walls, ...home.rooms, ...home.furniture]) item.level ??= command.assignExistingTo
+      }
+      home.levels = sortLevels([...home.levels, ...command.levels])
+      home.selectedLevel = command.levels[command.levels.length - 1]?.id ?? home.selectedLevel
+      break
+    case 'updateLevel': {
+      const level = home.levels.find((l) => l.id === command.change.id)
+      if (level) Object.assign(level, command.change)
+      home.levels = sortLevels(home.levels)
+      break
+    }
+    case 'deleteLevel': {
+      const index = home.levels.findIndex((l) => l.id === command.id)
+      if (index < 0) break
+      const onLevel = new Set([...home.walls, ...home.rooms, ...home.furniture].filter((i) => i.level === command.id).map((i) => i.id))
+      applyCommand(home, { type: 'deleteItems', ids: [...onLevel] })
+      home.levels.splice(index, 1)
+      if (home.selectedLevel === command.id) home.selectedLevel = home.levels[Math.max(0, index - 1)]?.id ?? null
+      if (home.levels.length === 0) {
+        // Letzte Ebene gelöscht: wieder ein Projekt ohne Ebenen
+        for (const item of [...home.walls, ...home.rooms, ...home.furniture]) item.level = null
+      }
+      break
+    }
     case 'updateWalls':
       applyChanges(home.walls, command.changes)
       break

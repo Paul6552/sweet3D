@@ -14,8 +14,10 @@ export interface Wall {
   /** Id der Wand, die am Endpunkt anschließt. */
   wallAtEnd: string | null
   thickness: number
-  /** Höhe in cm; {@code null} bedeutet Standardhöhe des Projekts. */
+  /** Höhe in cm; {@code null} bedeutet Höhe der Ebene bzw. Standardhöhe des Projekts. */
   height: number | null
+  /** Id der Ebene; {@code null}, solange das Projekt keine Ebenen hat. */
+  level: string | null
 }
 
 export interface Room {
@@ -24,6 +26,7 @@ export interface Room {
   points: [number, number][]
   floorVisible: boolean
   ceilingVisible: boolean
+  level: string | null
 }
 
 export interface HomePiece {
@@ -34,6 +37,7 @@ export interface HomePiece {
   /** Mittelpunkt im Plan. */
   x: number
   y: number
+  /** Höhe über dem Boden der eigenen Ebene. */
   elevation: number
   angle: number
   width: number
@@ -49,6 +53,7 @@ export interface HomePiece {
   /** Nur bei Türen und Fenstern gesetzt. */
   doorOrWindowInfo: DoorOrWindowInfo | null
   color: number | null
+  level: string | null
 }
 
 /**
@@ -65,11 +70,27 @@ export interface DoorOrWindowInfo {
   sashes: { xAxis: number; yAxis: number; width: number; startAngle: number; endAngle: number }[]
 }
 
+/**
+ * Geschoss wie in Sweet Home 3D. Wände, Räume und Möbel gehören über {@code level} zu einer Ebene;
+ * ein Projekt ohne Ebenen hat eine leere Liste und überall {@code null}.
+ */
+export interface Level {
+  id: string
+  name: string
+  /** Höhe des Fußbodens über dem Gelände in cm. */
+  elevation: number
+  /** Dicke der Decke darunter. */
+  floorThickness: number
+  /** Standardhöhe der Wände dieser Ebene. */
+  height: number
+  viewable: boolean
+}
+
 /** Virtueller Besucher (Augenposition im Plan, Blickrichtung). */
 export interface ObserverCamera {
   x: number
   y: number
-  /** Augenhöhe in cm. */
+  /** Augenhöhe in cm über dem Boden der gewählten Ebene. */
   z: number
   /** Blickrichtung im Plan in Radiant (0 = nach rechts, im Uhrzeigersinn, da y nach unten zeigt). */
   yaw: number
@@ -84,6 +105,10 @@ export type CameraMode = 'aerial' | 'observer'
 export interface Home {
   formatVersion: 1
   wallHeight: number
+  /** Nach Höhe sortiert, unterste zuerst. */
+  levels: Level[]
+  /** Ebene, die im Plan bearbeitet wird. */
+  selectedLevel: string | null
   walls: Wall[]
   rooms: Room[]
   furniture: HomePiece[]
@@ -94,6 +119,8 @@ export function createEmptyHome(): Home {
   return {
     formatVersion: 1,
     wallHeight: 250,
+    levels: [],
+    selectedLevel: null,
     walls: [],
     rooms: [],
     furniture: [],
@@ -111,9 +138,11 @@ export function normalizeHome(raw: unknown): Home {
   return {
     formatVersion: 1,
     wallHeight: home.wallHeight ?? empty.wallHeight,
-    walls: home.walls ?? [],
-    rooms: home.rooms ?? [],
-    furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null })),
+    levels: home.levels ?? [],
+    selectedLevel: home.selectedLevel ?? null,
+    walls: (home.walls ?? []).map((w) => ({ ...w, level: w.level ?? null })),
+    rooms: (home.rooms ?? []).map((r) => ({ ...r, level: r.level ?? null })),
+    furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null, level: p.level ?? null })),
     camera: home.camera ?? empty.camera,
   }
 }

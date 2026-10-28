@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { homeOnLevel } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { copySelection, pasteCommand } from './clipboard'
 
@@ -19,7 +20,8 @@ export function useShortcuts() {
         dispatch({ type: 'redo' })
       } else if (mod && key === 'a' && home) {
         event.preventDefault()
-        dispatch({ type: 'select', ids: [...home.walls, ...home.rooms, ...home.furniture.filter((p) => p.visible)].map((i) => i.id) })
+        const level = homeOnLevel(home)
+        dispatch({ type: 'select', ids: [...level.walls, ...level.rooms, ...level.furniture.filter((p) => p.visible)].map((i) => i.id) })
       } else if (mod && (key === 'c' || key === 'x') && home && selection.length > 0) {
         event.preventDefault()
         copySelection(home, selection)

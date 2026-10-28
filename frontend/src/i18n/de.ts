@@ -21,7 +21,6 @@ export const de = {
     import: '.sh3d importieren',
     importing: 'Importiere …',
     imported: 'Projekt „{{name}}“ importiert.',
-    importSkippedLevels: '{{count}} weitere Ebene(n) wurden nicht übernommen.',
     importMissingModels: '{{count}} Möbel ohne lesbares Modell werden als Platzhalter angezeigt.',
     importErrors: {
       notZip: 'Die Datei ist keine gültige .sh3d-Datei.',
@@ -76,6 +75,19 @@ export const de = {
     height: 'Höhe',
     visible: 'Sichtbar',
     empty: 'Noch keine Möbel im Projekt.',
+  },
+  levels: {
+    defaultName: 'Ebene {{n}}',
+    add: 'Ebene hinzufügen',
+    edit: 'Ebene ändern',
+    editHint: 'Doppelklick auf einen Reiter ändert die Ebene',
+    name: 'Name',
+    elevation: 'Höhe über Gelände',
+    height: 'Raumhöhe',
+    floorThickness: 'Deckenstärke',
+    viewable: 'In 3D sichtbar',
+    delete: 'Ebene löschen',
+    deleteConfirm: 'Ebene „{{name}}“ mit allen Wänden, Räumen und Möbeln löschen?',
   },
   plan: {
     modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen' },

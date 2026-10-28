@@ -23,7 +23,6 @@ export const en: Resources = {
     import: 'Import .sh3d',
     importing: 'Importing …',
     imported: 'Project “{{name}}” imported.',
-    importSkippedLevels: '{{count}} further level(s) were not imported.',
     importMissingModels: '{{count}} pieces without a readable model are shown as placeholders.',
     importErrors: {
       notZip: 'The file is not a valid .sh3d file.',
@@ -78,6 +77,19 @@ export const en: Resources = {
     height: 'Height',
     visible: 'Visible',
     empty: 'No furniture in this project yet.',
+  },
+  levels: {
+    defaultName: 'Level {{n}}',
+    add: 'Add level',
+    edit: 'Modify level',
+    editHint: 'Double-click a tab to modify the level',
+    name: 'Name',
+    elevation: 'Elevation',
+    height: 'Height',
+    floorThickness: 'Floor thickness',
+    viewable: 'Visible in 3D',
+    delete: 'Delete level',
+    deleteConfirm: 'Delete level “{{name}}” with all its walls, rooms and furniture?',
   },
   plan: {
     modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms' },

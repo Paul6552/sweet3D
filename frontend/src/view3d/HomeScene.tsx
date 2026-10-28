@@ -2,6 +2,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import { useMemo } from 'react'
 import { DoubleSide, Shape, ShapeGeometry } from 'three'
 import type { Home } from '../model/home'
+import { defaultWallHeight, visibleLevels } from '../model/levels'
 import { dispatch } from '../store/editorStore'
 import { PieceModel } from './PieceModel'
 import { wallSlices } from './wallGeometry'
@@ -28,21 +29,46 @@ function roomGeometry(points: [number, number][]): ShapeGeometry {
 }
 
 /**
- * Inhalt der 3D-Ansicht in cm. Ebenen aus dem Plan (x, y) werden um +90° um die x-Achse
- * gedreht, sodass Plan-y zu three.js-z wird; extrudierte Wände wachsen dabei nach unten,
- * daher liegt ihr Ursprung an der Oberkante.
+ * Inhalt der 3D-Ansicht in cm: wie in Sweet Home 3D die gewählte Ebene und alle darunter, jede
+ * auf ihrer Höhe. Ohne Ebenen gibt es genau eine Gruppe auf Höhe 0.
  */
 export function HomeScene({ home, selection, selectionColor, showCeilings }: HomeSceneProps) {
-  const wallsById = useMemo(() => new Map(home.walls.map((w) => [w.id, w])), [home.walls])
-  const doorsAndWindows = useMemo(() => home.furniture.filter((p) => p.doorOrWindow), [home.furniture])
-  const walls = useMemo(
-    () => home.walls.map((wall) => ({ wall, slices: wallSlices(wall, home.wallHeight, doorsAndWindows, wallsById) })),
-    [home.walls, home.wallHeight, doorsAndWindows, wallsById],
-  )
-  const rooms = useMemo(() => home.rooms.map((room) => ({ room, geometry: roomGeometry(room.points) })), [home.rooms])
-
   return (
     <group>
+      {visibleLevels(home).map((level) => (
+        <group key={level?.id ?? 'home'} position-y={level?.elevation ?? 0}>
+          <LevelScene
+            home={home}
+            levelId={level?.id ?? null}
+            selection={selection}
+            selectionColor={selectionColor}
+            showCeilings={showCeilings}
+          />
+        </group>
+      ))}
+    </group>
+  )
+}
+
+/**
+ * Eine Ebene. Flächen aus dem Plan (x, y) werden um +90° um die x-Achse gedreht, sodass Plan-y
+ * zu three.js-z wird; extrudierte Wände wachsen dabei nach unten, daher liegt ihr Ursprung an der Oberkante.
+ */
+function LevelScene({ home, levelId, selection, selectionColor, showCeilings }: Omit<HomeSceneProps, 'home'> & { home: Home; levelId: string | null }) {
+  const levelWalls = useMemo(() => home.walls.filter((w) => w.level === levelId), [home.walls, levelId])
+  const levelRooms = useMemo(() => home.rooms.filter((r) => r.level === levelId), [home.rooms, levelId])
+  const levelFurniture = useMemo(() => home.furniture.filter((p) => p.level === levelId), [home.furniture, levelId])
+  const height = defaultWallHeight(home, levelId)
+  const wallsById = useMemo(() => new Map(levelWalls.map((w) => [w.id, w])), [levelWalls])
+  const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow), [levelFurniture])
+  const walls = useMemo(
+    () => levelWalls.map((wall) => ({ wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById) })),
+    [levelWalls, height, doorsAndWindows, wallsById],
+  )
+  const rooms = useMemo(() => levelRooms.map((room) => ({ room, geometry: roomGeometry(room.points) })), [levelRooms])
+
+  return (
+    <>
       {walls.map(({ wall, slices }) =>
         slices.map((slice, i) => (
           <mesh
@@ -67,14 +93,14 @@ export function HomeScene({ home, selection, selectionColor, showCeilings }: Hom
             </mesh>
           )}
           {room.ceilingVisible && showCeilings && (
-            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={home.wallHeight - 0.5}>
+            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5}>
               <meshStandardMaterial color="#fafafa" side={DoubleSide} />
             </mesh>
           )}
         </group>
       ))}
 
-      {home.furniture
+      {levelFurniture
         .filter((p) => p.visible)
         .map((piece) => (
           <PieceModel
@@ -85,6 +111,6 @@ export function HomeScene({ home, selection, selectionColor, showCeilings }: Hom
             onSelect={(e, id) => selectOnClick(e, id, selection)}
           />
         ))}
-    </group>
+    </>
   )
 }

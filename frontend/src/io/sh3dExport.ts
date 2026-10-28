@@ -3,6 +3,7 @@ import { catalogApi, type CatalogPiece } from '../api/catalog'
 import { contentKey, isContentRef } from '../model/contents'
 import { contentBlobs } from '../storage/contents'
 import type { Home, HomePiece } from '../model/home'
+import { defaultWallHeight, levelElevation } from '../model/levels'
 import { fromObserverPitch, fromObserverYaw } from './sh3dCamera'
 
 /** Modell für Möbel ohne ladbares Modell, damit Sweet Home 3D die Datei öffnen kann. */
@@ -64,32 +65,47 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
   const { observer } = home.camera
   const xml = [
     "<?xml version='1.0'?>",
-    `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}' wallHeight='${home.wallHeight}'>`,
+    `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}'${home.selectedLevel ? ` selectedLevel='${escapeXml(home.selectedLevel)}'` : ''} wallHeight='${home.wallHeight}'>`,
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
     `  ${element('observerCamera', {
       attribute: 'observerCamera',
       lens: 'PINHOLE',
       x: observer.x,
       y: observer.y,
-      z: observer.z,
+      z: observer.z + levelElevation(home, home.selectedLevel),
       yaw: fromObserverYaw(observer.yaw),
       pitch: fromObserverPitch(observer.pitch),
       fieldOfView: observer.fieldOfView,
     })}`,
     // Standard-Luftansicht von Sweet Home 3D; die Desktop-App richtet sie beim Öffnen selbst aus
     `  ${element('camera', { attribute: 'topCamera', lens: 'PINHOLE', x: 50, y: 1050, z: 1010, yaw: Math.PI, pitch: Math.PI / 4, fieldOfView: (63 * Math.PI) / 180 })}`,
+    // Ebenen vor allem, was auf sie verweist; elevationIndex ordnet Ebenen gleicher Höhe
+    ...home.levels.map(
+      (level, index) =>
+        `  ${element('level', {
+          id: level.id,
+          name: level.name,
+          elevation: level.elevation,
+          floorThickness: level.floorThickness,
+          height: level.height,
+          elevationIndex: home.levels.filter((l, i) => i < index && l.elevation === level.elevation).length,
+          viewable: level.viewable ? null : false,
+        })}`,
+    ),
     ...pieces.map((p) => `  ${p}`),
     ...home.walls.map(
       (wall) =>
         `  ${element('wall', {
           id: wall.id,
+          level: wall.level,
           wallAtStart: wall.wallAtStart,
           wallAtEnd: wall.wallAtEnd,
           xStart: wall.xStart,
           yStart: wall.yStart,
           xEnd: wall.xEnd,
           yEnd: wall.yEnd,
-          height: wall.height,
+          // Ohne eigene Höhe nimmt Sweet Home 3D die Projekthöhe, nicht die der Ebene
+          height: wall.height ?? defaultWallHeight(home, wall.level),
           thickness: wall.thickness,
           pattern: 'hatchUp',
         })}`,
@@ -97,6 +113,7 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
     ...home.rooms.map((room) => {
       const attributes = element('room', {
         id: room.id,
+        level: room.level,
         name: room.name,
         areaVisible: true,
         floorVisible: room.floorVisible ? null : false,
@@ -126,6 +143,7 @@ async function pieceXml(piece: HomePiece, catalogPiece: CatalogPiece | undefined
   const catalogDoor = catalogPiece?.doorOrWindow
   const attributes = {
     id: piece.id,
+    level: piece.level,
     catalogId: piece.catalogId,
     name: piece.name,
     creator: catalogPiece?.creator ?? null,

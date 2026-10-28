@@ -28,5 +28,6 @@ export function pieceFromCatalog(piece: CatalogPiece, x: number, y: number): Hom
       sashes: piece.doorOrWindow.sashes,
     },
     color: piece.color,
+    level: null,
   }
 }

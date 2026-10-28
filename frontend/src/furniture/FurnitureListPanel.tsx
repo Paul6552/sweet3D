@@ -6,6 +6,7 @@ import TableContainer from '@mui/material/TableContainer'
 import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Typography from '@mui/material/Typography'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 
@@ -13,7 +14,13 @@ const format = (value: number) => (Math.round(value * 10) / 10).toLocaleString()
 
 export function FurnitureListPanel() {
   const { t } = useTranslation()
-  const furniture = useEditorStore((s) => s.home?.furniture ?? [])
+  const allFurniture = useEditorStore((s) => s.home?.furniture)
+  const level = useEditorStore((s) => (s.home?.levels.length ? s.home.selectedLevel : undefined))
+  // Wie in Sweet Home 3D nur die Möbel der gewählten Ebene
+  const furniture = useMemo(
+    () => (level === undefined ? (allFurniture ?? []) : (allFurniture ?? []).filter((p) => p.level === level)),
+    [allFurniture, level],
+  )
   const selection = useEditorStore((s) => s.selection)
 
   if (furniture.length === 0) {

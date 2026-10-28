@@ -76,6 +76,18 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
         if (patches.length > 0) applyAndBroadcast(next, patches)
         break
       }
+      case 'selectLevel': {
+        const [next, patches] = produceWithPatches(home, (draft) => {
+          if (draft.levels.some((l) => l.id === action.id)) draft.selectedLevel = action.id
+        })
+        if (patches.length > 0) {
+          applyAndBroadcast(next, patches)
+          // Auswahl gilt nur auf einer Ebene
+          useEditorStore.setState({ selection: [] })
+          post({ type: 'selection', ids: [] })
+        }
+        break
+      }
       case 'select':
         useEditorStore.setState({ selection: action.ids })
         post({ type: 'selection', ids: action.ids })

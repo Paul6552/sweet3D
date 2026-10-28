@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Vector3 } from 'three'
 import type { CameraMode, Home } from '../model/home'
+import { visibleLevels } from '../model/levels'
 import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
@@ -20,8 +21,10 @@ import { HomeScene } from './HomeScene'
 
 function sceneBounds(home: Home): SceneBounds {
   const b = homeBounds(home) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
-  const center = new Vector3((b.minX + b.maxX) / 2, home.wallHeight / 3, (b.minY + b.maxY) / 2)
-  const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, home.wallHeight) / 2 + 100
+  // Oberkante der obersten sichtbaren Ebene
+  const top = Math.max(...visibleLevels(home).map((l) => (l ? l.elevation + l.height : home.wallHeight)))
+  const center = new Vector3((b.minX + b.maxX) / 2, top / 3, (b.minY + b.maxY) / 2)
+  const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top) / 2 + 100
   return { center, radius }
 }
 
@@ -63,9 +66,12 @@ export function View3DPanel() {
   const furniture = home?.furniture
   const rooms = home?.rooms
   const wallHeight = home?.wallHeight
+  const levels = home?.levels
+  const level = home?.selectedLevel
   const bounds = useMemo(
-    () => sceneBounds({ walls: walls ?? [], furniture: furniture ?? [], rooms: rooms ?? [], wallHeight: wallHeight ?? 250 } as Home),
-    [walls, furniture, rooms, wallHeight],
+    () =>
+      sceneBounds({ walls: walls ?? [], furniture: furniture ?? [], rooms: rooms ?? [], wallHeight: wallHeight ?? 250, levels: levels ?? [], selectedLevel: level ?? null } as Home),
+    [walls, furniture, rooms, wallHeight, levels, level],
   )
   if (!home) return null
   const mode = home.camera.mode

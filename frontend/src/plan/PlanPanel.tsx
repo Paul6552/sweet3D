@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Point } from '../model/geometry'
 import { useEditorStore } from '../store/editorStore'
+import { LevelTabs } from './LevelTabs'
 import { PlanCanvas } from './PlanCanvas'
 import { usePlanStore, zoomAt, type PlanMode } from './planStore'
 
@@ -96,6 +97,7 @@ export function PlanPanel() {
           </ToggleButton>
         </Tooltip>
       </Box>
+      <LevelTabs />
       <Box ref={areaRef} sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <PlanCanvas onStatus={onStatus} />
       </Box>

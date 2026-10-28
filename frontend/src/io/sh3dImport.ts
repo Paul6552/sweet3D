@@ -1,15 +1,15 @@
 import { strFromU8, unzip, type Unzipped } from 'fflate'
 import type { CatalogPiece } from '../api/catalog'
 import { CONTENT_PREFIX, guessMime } from '../model/contents'
-import { createEmptyHome, type DoorOrWindowInfo, type Home, type HomePiece, type Room, type Wall } from '../model/home'
+import { createEmptyHome, type DoorOrWindowInfo, type Home, type HomePiece, type Level, type Room, type Wall } from '../model/home'
+import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
 
 export interface ImportResult {
   home: Home
   /** Importierte Modelle und Symbole für IndexedDB, Schlüssel wie in „content:<Schlüssel>“. */
   contents: Record<string, Blob>
-  /** Hinweise für den Nutzer: Anzahl übersprungener Ebenen, Möbel ohne ladbares Modell. */
-  skippedLevels: number
+  /** Hinweis für den Nutzer: Möbel ohne ladbares Modell. */
   missingModels: number
 }
 
@@ -27,7 +27,7 @@ const FURNITURE_ELEMENTS = new Set(['pieceOfFurniture', 'doorOrWindow', 'light']
 /**
  * Liest eine .sh3d-Datei über ihren Eintrag Home.xml (Sweet Home 3D ab 5.3). Möbel aus dem
  * Standardkatalog verweisen auf dessen Modelle; alle anderen Modelle und Symbole werden als
- * Blobs übernommen. Bei mehreren Ebenen wird nur die unterste gelesen.
+ * Blobs übernommen.
  */
 export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Promise<ImportResult> {
   let files: Unzipped
@@ -48,10 +48,30 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
   const toBlob = (bytes: Uint8Array, name: string) => new Blob([bytes as Uint8Array<ArrayBuffer>], { type: guessMime(bytes, name) })
   home.wallHeight = num(root, 'wallHeight') ?? home.wallHeight
 
-  // Nur die unterste Ebene; Elemente ohne Ebene gehören zu ihr
-  const levels = [...root.children].filter((e) => e.nodeName === 'level')
-  const lowest = levels.reduce<Element | null>((best, level) => (!best || (num(level, 'elevation') ?? 0) < (num(best, 'elevation') ?? 0) ? level : best), null)
-  const onLevel = (e: Element) => !lowest || !e.getAttribute('level') || e.getAttribute('level') === lowest.getAttribute('id')
+  // Ebenen in der Reihenfolge von Sweet Home 3D: nach Höhe, dann elevationIndex
+  const levelElements = [...root.children]
+    .filter((e) => e.nodeName === 'level')
+    .sort((a, b) => (num(a, 'elevation') ?? 0) - (num(b, 'elevation') ?? 0) || (num(a, 'elevationIndex') ?? 0) - (num(b, 'elevationIndex') ?? 0))
+  home.levels = sortLevels(
+    levelElements.map((e, index): Level => ({
+      id: e.getAttribute('id') ?? `level-${index}`,
+      name: e.getAttribute('name') ?? String(index),
+      elevation: num(e, 'elevation') ?? 0,
+      floorThickness: num(e, 'floorThickness') ?? DEFAULT_FLOOR_THICKNESS,
+      height: num(e, 'height') ?? home.wallHeight,
+      // Ältere Dateien kennen nur „visible“; sichtbar ist eine Ebene, wenn keins von beiden false ist
+      viewable: e.getAttribute('viewable') !== 'false' && e.getAttribute('visible') !== 'false',
+    })),
+  )
+  const levelIds = new Set(home.levels.map((l) => l.id))
+  const lowest = home.levels[0]?.id ?? null
+  /** Ebene eines Elements; ohne gültige Angabe die unterste. */
+  const levelOf = (e: Element) => {
+    const id = e.getAttribute('level')
+    return id && levelIds.has(id) ? id : lowest
+  }
+  const selected = root.getAttribute('selectedLevel')
+  home.selectedLevel = selected && levelIds.has(selected) ? selected : lowest
 
   const imported = new Map<string, string | null>()
   /** Übernimmt einen Inhalt der Datei (einzeln oder als Verzeichnis eines mehrteiligen Modells). */
@@ -80,7 +100,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
   }
 
   let missingModels = 0
-  const readPiece = (e: Element) => {
+  const readPiece = (e: Element, level: string | null) => {
     const catalogPiece = byCatalogId.get(e.getAttribute('catalogId') ?? '')
     const model = catalogPiece?.model ?? content(e.getAttribute('model'))
     if (!model) missingModels++
@@ -107,21 +127,22 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       doorOrWindow,
       doorOrWindowInfo: doorOrWindow ? doorInfo(e) : null,
       color: e.getAttribute('color') ? Number.parseInt(e.getAttribute('color')!, 16) | 0 : null,
+      level,
     }
     home.furniture.push(piece)
   }
 
-  const readFurniture = (parent: Element) => {
+  const readFurniture = (parent: Element, groupLevel: string | null) => {
     for (const e of parent.children) {
-      if (!onLevel(e)) continue
+      const level = groupLevel ?? levelOf(e)
       // Gruppen auflösen: Sweet Home 3D speichert die enthaltenen Möbel mit absoluten Koordinaten
-      if (e.nodeName === 'furnitureGroup') readFurniture(e)
-      else if (FURNITURE_ELEMENTS.has(e.nodeName)) readPiece(e)
+      if (e.nodeName === 'furnitureGroup') readFurniture(e, level)
+      else if (FURNITURE_ELEMENTS.has(e.nodeName)) readPiece(e, level)
     }
   }
-  readFurniture(root)
+  readFurniture(root, null)
 
-  const walls = [...root.children].filter((e) => e.nodeName === 'wall' && onLevel(e))
+  const walls = [...root.children].filter((e) => e.nodeName === 'wall')
   const wallIds = new Set(walls.map((e) => e.getAttribute('id')))
   home.walls = walls.map((e): Wall => {
     const joined = (attribute: string) => {
@@ -139,17 +160,19 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       wallAtEnd: joined('wallAtEnd'),
       thickness: num(e, 'thickness') ?? 10,
       height: height && height > 0 ? height : null,
+      level: levelOf(e),
     }
   })
 
   home.rooms = [...root.children]
-    .filter((e) => e.nodeName === 'room' && onLevel(e))
+    .filter((e) => e.nodeName === 'room')
     .map((e): Room => ({
       id: e.getAttribute('id') ?? `room-${crypto.randomUUID()}`,
       name: e.getAttribute('name'),
       points: [...e.children].filter((p) => p.nodeName === 'point').map((p) => [num(p, 'x') ?? 0, num(p, 'y') ?? 0]),
       floorVisible: e.getAttribute('floorVisible') !== 'false',
       ceilingVisible: e.getAttribute('ceilingVisible') !== 'false',
+      level: levelOf(e),
     }))
     .filter((room) => room.points.length >= 3)
 
@@ -158,7 +181,8 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
     home.camera.observer = {
       x: num(observer, 'x') ?? home.camera.observer.x,
       y: num(observer, 'y') ?? home.camera.observer.y,
-      z: num(observer, 'z') ?? home.camera.observer.z,
+      // Sweet Home 3D speichert die Augenhöhe über dem Gelände, Sweet3D über der gewählten Ebene
+      z: Math.max(20, (num(observer, 'z') ?? home.camera.observer.z) - levelElevation(home, home.selectedLevel)),
       yaw: toObserverYaw(num(observer, 'yaw') ?? 0),
       pitch: toObserverPitch(num(observer, 'pitch') ?? 0),
       fieldOfView: num(observer, 'fieldOfView') ?? home.camera.observer.fieldOfView,
@@ -166,7 +190,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
   }
   home.camera.mode = root.getAttribute('camera') === 'observerCamera' ? 'observer' : 'aerial'
 
-  return { home, contents, skippedLevels: Math.max(0, levels.length - 1), missingModels }
+  return { home, contents, missingModels }
 }
 
 function doorInfo(e: Element): DoorOrWindowInfo {

@@ -25,6 +25,7 @@ export function createWallCommand(
     wallAtEnd: endJoin?.wall?.id ?? null,
     thickness: DEFAULT_WALL_THICKNESS,
     height: null,
+    level: null,
   }
   const changes = [startJoin, endJoin]
     .filter((join): join is WallEndSnap & { wall: Wall } => join?.wall != null)

@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { MathUtils, Vector3, type PerspectiveCamera as ThreePerspectiveCamera } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { ObserverCamera } from '../model/home'
+import { levelElevation } from '../model/levels'
 import { dispatch, useEditorStore } from '../store/editorStore'
 
 export interface SceneBounds {
@@ -54,6 +55,8 @@ const SEND_INTERVAL_MS = 80
  */
 export function ObserverCameraRig() {
   const observer = useEditorStore((s) => s.home!.camera.observer)
+  // Augenhöhe gilt über dem Fußboden der gewählten Ebene
+  const floor = useEditorStore((s) => levelElevation(s.home!, s.home!.selectedLevel))
   const { gl, size } = useThree()
   const camera = useRef<ThreePerspectiveCamera>(null)
   const local = useRef<ObserverCamera>({ ...observer })
@@ -131,7 +134,7 @@ export function ObserverCameraRig() {
     released.current.clear()
 
     // Plan (x, y) -> three (x, z), Augenhöhe -> y
-    cam.position.set(o.x, o.z, o.y)
+    cam.position.set(o.x, floor + o.z, o.y)
     const direction = new Vector3(Math.cos(o.yaw) * Math.cos(o.pitch), Math.sin(o.pitch), Math.sin(o.yaw) * Math.cos(o.pitch))
     cam.lookAt(cam.position.clone().add(direction))
     const verticalFov = MathUtils.radToDeg(2 * Math.atan(Math.tan(o.fieldOfView / 2) / (size.width / size.height || 1)))

@@ -23,17 +23,17 @@ export async function downloadSh3d(home: Home, name: string, language: string) {
 }
 
 export type ImportOutcome =
-  | { ok: true; project: ProjectSummary; skippedLevels: number; missingModels: number }
+  | { ok: true; project: ProjectSummary; missingModels: number }
   | { ok: false; error: 'notZip' | 'noXml' | 'quota' | 'failed' }
 
 /** Importiert eine .sh3d-Datei als neues Projekt im Browser. */
 export async function importSh3dFile(file: File, language: string): Promise<ImportOutcome> {
   try {
     const [data, catalog] = await Promise.all([file.arrayBuffer(), catalogPieces(language)])
-    const { home, contents, skippedLevels, missingModels } = await importSh3d(new Uint8Array(data), catalog)
+    const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), catalog)
     requestPersistentStorage()
     const project = await createProject(projectNameFromFile(file.name), home, contents)
-    return { ok: true, project, skippedLevels, missingModels }
+    return { ok: true, project, missingModels }
   } catch (error) {
     if (error instanceof Sh3dImportError) return { ok: false, error: error.reason }
     if (isQuotaError(error)) return { ok: false, error: 'quota' }

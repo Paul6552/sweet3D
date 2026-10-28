@@ -8,6 +8,7 @@ import { applyCommand, type HomeCommand } from '../model/commands'
 import { pieceFromCatalog } from '../model/furniture'
 import { distance, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
+import { homeOnLevel, levelBelow } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
 import {
@@ -159,7 +160,13 @@ function cursorFor(handle: Handle | null, overItem: boolean): string {
  */
 export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | null; hint: string }) => void }) {
   const { t } = useTranslation()
-  const home = useEditorStore((s) => s.home)!
+  const fullHome = useEditorStore((s) => s.home)!
+  // Der Plan zeigt und bearbeitet nur die gewählte Ebene
+  const home = useMemo(() => homeOnLevel(fullHome), [fullHome])
+  const wallsBelow = useMemo(() => {
+    const below = levelBelow(fullHome)
+    return below ? fullHome.walls.filter((w) => w.level === below.id) : undefined
+  }, [fullHome])
   const selection = useEditorStore((s) => s.selection)
   const { mode, magnetism, view, setView, fitRequest } = usePlanStore()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -185,7 +192,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
 
   const fit = useCallback(() => {
     if (size.width === 0 || size.height === 0) return
-    const bounds = homeBounds(useEditorStore.getState().home!) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
+    const bounds = homeBounds(homeOnLevel(useEditorStore.getState().home!)) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
     const padding = 40
     const width = Math.max(bounds.maxX - bounds.minX, 200)
     const height = Math.max(bounds.maxY - bounds.minY, 200)
@@ -242,7 +249,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       const unique = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5)
       if (unique.length > 2 && distance(unique[0], unique.at(-1)!) < 0.5) unique.pop()
       if (unique.length >= 3) {
-        const room = { id: newId('room'), name: null, points: unique, floorVisible: true, ceilingVisible: true }
+        const room = { id: newId('room'), name: null, points: unique, floorVisible: true, ceilingVisible: true, level: null }
         executeCommand({ type: 'addItems', rooms: [room] })
         dispatch({ type: 'select', ids: [room.id] })
       }
@@ -435,6 +442,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       wallAtEnd: null,
       thickness: DEFAULT_WALL_THICKNESS,
       height: null,
+      level: null,
     }
     preview.wall = wall
     preview.label = { point: pointer.point, text: `${round1(wallLength(wall))} cm · ${degrees(-Math.atan2(wall.yEnd - wall.yStart, wall.xEnd - wall.xStart))}°` }
@@ -487,7 +495,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       {size.width > 0 && (
         <Stage width={size.width} height={size.height} scaleX={scale} scaleY={scale} x={view.x} y={view.y} listening={false}>
           <Layer listening={false}>
-            <PlanRenderer home={displayed} selection={selection} view={view} width={size.width} height={size.height} preview={preview} />
+            <PlanRenderer home={displayed} selection={selection} view={view} width={size.width} height={size.height} preview={preview} wallsBelow={wallsBelow} />
           </Layer>
         </Stage>
       )}

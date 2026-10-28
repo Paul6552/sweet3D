@@ -44,7 +44,10 @@ docker compose up -d --build   # http://localhost:8180
 - Herunterladen als `.sh3d` über das Download-Symbol in der Werkzeugleiste oder im Projektdialog.
   Die Datei enthält `Home.xml` und die Modelle und öffnet sich in Sweet Home 3D ab Version 5.3.
 - Import: Dateien aus Sweet Home 3D ab 5.3. Möbel aus dem Standardkatalog nutzen dessen Modelle, andere Modelle
-  werden ins Projekt übernommen (OBJ). Bei mehreren Ebenen wird nur die unterste übernommen.
+  werden ins Projekt übernommen (OBJ). Alle Ebenen werden übernommen und wieder exportiert.
+- Ebenen: Reiter über dem Plan wählen die Ebene, „+“ legt eine neue über der obersten an, Doppelklick auf einen
+  Reiter ändert Name, Höhe, Raumhöhe, Deckenstärke und Sichtbarkeit oder löscht die Ebene. Der Plan zeigt die
+  Ebene darunter blass, die 3D-Ansicht wie Sweet Home 3D die gewählte Ebene und alle darunter.
 - Die Daten gehören zum Browser und zur Adresse der Seite: ein anderer Browser oder Rechner sieht sie nicht.
   Zum Sichern oder Weitergeben `.sh3d` herunterladen.
 
@@ -67,7 +70,8 @@ lösen, z. B. 2D-Plan auf Bildschirm 1 und 3D-Ansicht auf Bildschirm 2.
 - [x] 2D-Planeditor (Wände mit Gehrung und Magnetismus, Räume inkl. automatischer Erkennung, Möbel verschieben/drehen/skalieren, Türen/Fenster rasten in Wände ein, Kopieren/Einfügen)
 - [x] 3D-Ansicht (react-three-fiber: Wände mit Tür-/Fensteröffnungen, Böden, Möbelmodelle, Luftansicht und virtueller Besucher)
 - [x] `.sh3d`-Import und -Download
-- [ ] Ebenen, Maßlinien und Texte, Eigenschaftsdialoge (Farben, Texturen), Vorschaubilder
+- [x] Ebenen
+- [ ] Maßlinien und Texte, Eigenschaftsdialoge (Farben, Texturen), Vorschaubilder
 
 ## Lizenz
 

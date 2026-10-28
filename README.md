@@ -75,5 +75,9 @@ lösen, z. B. 2D-Plan auf Bildschirm 1 und 3D-Ansicht auf Bildschirm 2.
 
 ## Lizenz
 
-Sweet Home 3D und die mitgelieferten Kataloge stehen unter der GNU GPL (siehe `COPYING.TXT` der Desktop-Distribution).
-Wer Sweet3D Dritten anbietet, muss den Quellcode ebenfalls unter der GPL bereitstellen.
+Sweet3D ist freie Software unter der [GNU General Public License v3.0](LICENSE), wie Sweet Home 3D selbst,
+dessen Kataloge und Programmbibliothek mitgeliefert werden.
+
+Jeder darf Sweet3D kostenlos verwenden, privat, als Hobby oder kommerziell, und es verändern und weitergeben.
+Wer eine veränderte Version weitergibt, muss sie ebenfalls unter der GPL mit Quellcode bereitstellen. Da der
+Code beim Aufruf der Seite in den Browser übertragen wird, gilt das auch für eine öffentlich gehostete Version.

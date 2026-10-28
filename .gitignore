@@ -1,9 +1,21 @@
+# Abhängigkeiten und Build
+node_modules
+dist
+*.local
+
+# Aus vendor/sh3d erzeugt (npm run catalog)
+public/catalog/
+
+# Logs
+*.log
+
+# Editoren
 .idea/
 *.iml
-frontend/node_modules/
-frontend/dist/
-# Aus vendor/sh3d erzeugt (npm run catalog)
-frontend/public/catalog/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.sw?
 
 # Testdateien im Projektordner
 /*.sh3d

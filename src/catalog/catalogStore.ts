@@ -9,7 +9,7 @@ interface CatalogState {
   findPiece: (id: string) => CatalogPiece | undefined
 }
 
-/** Möbelkatalog des Backends, einmal je Fenster und Sprache geladen. */
+/** Möbelkatalog aus public/catalog, einmal je Fenster und Sprache geladen. */
 export const useCatalogStore = create<CatalogState>((set, get) => ({
   language: null,
   furniture: null,

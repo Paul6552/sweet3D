@@ -2,7 +2,7 @@ name: sweet3d
 
 services:
   sweet3d-web:
-    build: ./frontend
+    build: .
     container_name: sweet3d-web
     ports:
       - "127.0.0.1:8180:80"

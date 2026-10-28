@@ -4,16 +4,16 @@ Web-Version von [Sweet Home 3D](https://www.sweethome3d.com), die komplett im Br
 kein Server, kein Login, keine Datenbank. Projekte liegen in der IndexedDB des Browsers und lassen sich als
 `.sh3d` herunterladen und mit der Desktop-App austauschen.
 
-| Ordner | Inhalt |
+| Pfad | Inhalt |
 |---|---|
-| `frontend/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP), idb (IndexedDB) |
-| `frontend/vendor/sh3d/` | `Furniture.jar`, `Textures.jar`, `SweetHome3D.jar` aus der Sweet Home 3D 7.5 Distribution |
-| `frontend/scripts/build-catalog.mjs` | erzeugt daraus den Katalog als statische Dateien in `frontend/public/catalog` |
+| `src/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP), idb (IndexedDB) |
+| `vendor/sh3d/` | `Furniture.jar`, `Textures.jar`, `SweetHome3D.jar` aus der Sweet Home 3D 7.5 Distribution |
+| `scripts/build-catalog.mjs` | erzeugt daraus den Katalog als statische Dateien in `public/catalog` |
+| `Dockerfile`, `nginx.conf`, `docker-compose.yml` | optional: statische Seite mit nginx ausliefern |
 
 ## Entwicklung
 
 ```bash
-cd frontend
 npm install
 npm run dev     # http://localhost:5173, erzeugt vorher den Katalog
 npm run build   # statische Seite in dist/
@@ -25,8 +25,8 @@ npm run lint
 
 ## Selbst hosten
 
-`frontend/dist` ist eine statische Seite und läuft auf jedem Webserver. Für die Adressen `/editor/...`
-muss der Server unbekannte Pfade mit `index.html` beantworten (siehe `frontend/nginx.conf`).
+`dist` ist nach `npm run build` eine statische Seite und läuft auf jedem Webserver. Für die Adressen `/editor/...`
+muss der Server unbekannte Pfade mit `index.html` beantworten (siehe `nginx.conf`).
 
 Mit Docker (nginx):
 

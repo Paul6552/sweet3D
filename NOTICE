@@ -1,0 +1,9 @@
+Sweet3D
+Copyright (c) 2026 Christoph Paul Pedretscher
+Licensed under the MIT License, see LICENSE.
+
+This license covers the Sweet3D source code. The files in vendor/sh3d
+(SweetHome3D.jar, Furniture.jar, Textures.jar) and the catalog generated from
+them into public/catalog are part of Sweet Home 3D by Space Mushrooms and are
+licensed under the GNU General Public License version 2 or later, see
+vendor/sh3d/LICENSE.TXT and vendor/sh3d/COPYING.TXT.

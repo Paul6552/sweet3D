@@ -19,11 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This license covers the Sweet3D source code. The files in vendor/sh3d
-(SweetHome3D.jar, Furniture.jar, Textures.jar) and the catalog generated from
-them into public/catalog are part of Sweet Home 3D by Space Mushrooms and are
-licensed under the GNU General Public License version 2 or later, see
-vendor/sh3d/LICENSE.TXT and vendor/sh3d/COPYING.TXT.

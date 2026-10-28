@@ -1,5 +1,5 @@
 import type { ThreeEvent } from '@react-three/fiber'
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { DoubleSide, Shape, ShapeGeometry } from 'three'
 import type { Home } from '../model/home'
 import { defaultWallHeight, visibleLevels } from '../model/levels'
@@ -32,7 +32,19 @@ function roomGeometry(points: [number, number][]): ShapeGeometry {
  * Inhalt der 3D-Ansicht in cm: wie in Sweet Home 3D die gewählte Ebene und alle darunter, jede
  * auf ihrer Höhe. Ohne Ebenen gibt es genau eine Gruppe auf Höhe 0.
  */
-export function HomeScene({ home, selection, selectionColor, showCeilings }: HomeSceneProps) {
+/** Kamerabewegungen ändern nur home.camera; die Szene muss dafür nicht neu gerendert werden. */
+const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
+  a.selection === b.selection &&
+  a.selectionColor === b.selectionColor &&
+  a.showCeilings === b.showCeilings &&
+  a.home.walls === b.home.walls &&
+  a.home.rooms === b.home.rooms &&
+  a.home.furniture === b.home.furniture &&
+  a.home.levels === b.home.levels &&
+  a.home.selectedLevel === b.home.selectedLevel &&
+  a.home.wallHeight === b.home.wallHeight
+
+export const HomeScene = memo(function HomeScene({ home, selection, selectionColor, showCeilings }: HomeSceneProps) {
   return (
     <group>
       {visibleLevels(home).map((level) => (
@@ -48,7 +60,7 @@ export function HomeScene({ home, selection, selectionColor, showCeilings }: Hom
       ))}
     </group>
   )
-}
+}, sameScene)
 
 /**
  * Eine Ebene. Flächen aus dem Plan (x, y) werden um +90° um die x-Achse gedreht, sodass Plan-y

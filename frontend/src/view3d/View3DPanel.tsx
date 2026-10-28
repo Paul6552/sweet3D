@@ -17,6 +17,7 @@ import { visibleLevels } from '../model/levels'
 import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
+import { Ground, HORIZON, Sky } from './Environment'
 import { HomeScene } from './HomeScene'
 
 function sceneBounds(home: Home): SceneBounds {
@@ -109,14 +110,12 @@ export function View3DPanel() {
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative', '& canvas': { outline: 'none' } }}>
         <Canvas shadows dpr={[1, 2]} gl={{ antialias: true }} onPointerMissed={() => dispatch({ type: 'select', ids: [] })}>
-          <color attach="background" args={[theme.palette.mode === 'dark' ? '#5d7a99' : '#cfe3f5']} />
-          <fog attach="fog" args={[theme.palette.mode === 'dark' ? '#5d7a99' : '#cfe3f5', bounds.radius * 8, bounds.radius * 30]} />
+          <color attach="background" args={[HORIZON]} />
+          <fog attach="fog" args={[HORIZON, Math.max(bounds.radius * 3, 3000), Math.max(bounds.radius * 15, 40000)]} />
+          <Sky />
           <Lights bounds={bounds} />
           {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
-          <mesh rotation-x={-Math.PI / 2} position={[bounds.center.x, -0.5, bounds.center.z]} receiveShadow>
-            <planeGeometry args={[bounds.radius * 60, bounds.radius * 60]} />
-            <meshStandardMaterial color="#8da379" />
-          </mesh>
+          <Ground />
           <HomeScene home={home} selection={selection} selectionColor={theme.palette.primary.main} showCeilings={mode === 'observer'} />
         </Canvas>
       </Box>

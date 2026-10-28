@@ -13,7 +13,7 @@ export interface SceneBounds {
 }
 
 const NEAR = 5
-const FAR = 500000
+const FAR = 400000
 
 /** Luftansicht: Orbit um das Projekt, nicht über den Boden hinaus. */
 export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitRequest: number }) {
@@ -46,7 +46,7 @@ export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitR
 const WALK_SPEED = 250 // cm/s
 const TURN_SPEED = 1.5 // rad/s
 const MOUSE_SENSITIVITY = 0.004
-const SEND_INTERVAL_MS = 80
+const SEND_INTERVAL_MS = 200
 
 /**
  * Virtueller Besucher: W/S bzw. Pfeil hoch/runter gehen, A/D seitwärts, Pfeil links/rechts drehen,
@@ -65,9 +65,16 @@ export function ObserverCameraRig() {
   const released = useRef(new Set<string>())
   const lastSent = useRef(0)
   const unsent = useRef(false)
+  const sent = useRef<Pick<ObserverCamera, 'x' | 'y' | 'yaw' | 'pitch'> | null>(null)
 
-  // Änderungen von außen (z. B. im Plan verschoben) übernehmen, solange hier nichts bewegt wird
+  // Änderungen von außen (z. B. im Plan verschoben) übernehmen, solange hier nichts bewegt wird.
+  // Das Echo der eigenen Meldung (gerundet und schon veraltet) würde die Kamera zurückspringen lassen.
   useEffect(() => {
+    const own = sent.current
+    if (own && own.x === observer.x && own.y === observer.y && own.yaw === observer.yaw && own.pitch === observer.pitch) {
+      local.current = { ...local.current, z: observer.z, fieldOfView: observer.fieldOfView }
+      return
+    }
     if (!unsent.current) local.current = { ...observer }
   }, [observer])
 
@@ -147,10 +154,8 @@ export function ObserverCameraRig() {
     if (unsent.current && now - lastSent.current > SEND_INTERVAL_MS) {
       lastSent.current = now
       unsent.current = false
-      dispatch({
-        type: 'camera',
-        camera: { observer: { x: Math.round(o.x), y: Math.round(o.y), yaw: o.yaw, pitch: o.pitch } },
-      })
+      sent.current = { x: Math.round(o.x), y: Math.round(o.y), yaw: o.yaw, pitch: o.pitch }
+      dispatch({ type: 'camera', camera: { observer: sent.current } })
     }
   })
 

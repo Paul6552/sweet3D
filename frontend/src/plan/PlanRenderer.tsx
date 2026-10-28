@@ -1,5 +1,5 @@
 import { useTheme } from '@mui/material/styles'
-import { useMemo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
 import { polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
@@ -85,7 +85,7 @@ function Grid({ view, width, height, minor, major }: { view: PlanView; width: nu
   )
 }
 
-function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: HomePiece; scale: number; stroke: string; selected: boolean; selectedColor: string }) {
+const PieceShape = memo(function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: HomePiece; scale: number; stroke: string; selected: boolean; selectedColor: string }) {
   const image = useImage(useResolvedRef(piece.planIcon ?? piece.icon))
   const { width: w, depth: d } = piece
   // Symbol wie in Sweet Home 3D mit erhaltenem Seitenverhältnis einpassen
@@ -130,7 +130,7 @@ function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: 
       />
     </Group>
   )
-}
+})
 
 /** Virtueller Besucher: Kopf, Blickfeld und Drehgriff. */
 function Observer({ observer, scale, color, paper }: { observer: ObserverCamera; scale: number; color: string; paper: string }) {
@@ -174,7 +174,8 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
   }, [wallsBelow])
   const fontSize = 12 / scale
 
-  const wallShape = (wall: Wall, polygon: Point[], isSelected: boolean, dashed = false) => (
+  const wallShape = useCallback(
+    (wall: Wall, polygon: Point[], isSelected: boolean, dashed = false) => (
     <Line
       key={wall.id}
       points={flat(polygon)}
@@ -188,6 +189,71 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
       dash={dashed ? [6 / scale, 4 / scale] : undefined}
       listening={false}
     />
+    ),
+    [hatch, scale, selectedColor, ink],
+  )
+
+  // Wände, Räume und Möbel nur neu aufbauen, wenn sie sich ändern, nicht bei jeder Bewegung des Besuchers
+  const shapes = useMemo(
+    () => (
+      <>
+        {below.map(({ id, polygon }) => (
+          <Line
+            key={`below-${id}`}
+            points={flat(polygon)}
+            closed
+            fill={dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}
+            stroke={dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}
+            strokeWidth={1 / scale}
+            listening={false}
+          />
+        ))}
+
+        {home.rooms.map((room) => {
+          const [cx, cy] = polygonCentroid(room.points)
+          const area = (polygonArea(room.points) / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 })
+          const isSelected = selected.has(room.id)
+          return (
+            <Group key={room.id} listening={false}>
+              <Line
+                points={flat(room.points)}
+                closed
+                fill={dark ? 'rgba(144,202,249,0.10)' : 'rgba(25,118,210,0.07)'}
+                stroke={isSelected ? selectedColor : theme.palette.text.secondary}
+                strokeWidth={(isSelected ? 3 : 1) / scale}
+              />
+              <Text
+                x={cx}
+                y={cy}
+                text={`${room.name ? `${room.name}\n` : ''}${area} m²`}
+                fontSize={fontSize}
+                fill={theme.palette.text.secondary}
+                align="center"
+                width={200 / scale}
+                offsetX={100 / scale}
+                offsetY={fontSize / 2}
+              />
+            </Group>
+          )
+        })}
+
+        {home.walls.map((wall) => wallShape(wall, wallPolygon(wall, wallsById), selected.has(wall.id)))}
+
+        {home.furniture
+          .filter((p) => p.visible)
+          .map((piece) => (
+            <PieceShape
+              key={piece.id}
+              piece={piece}
+              scale={scale}
+              stroke={theme.palette.text.secondary}
+              selected={selected.has(piece.id)}
+              selectedColor={selectedColor}
+            />
+          ))}
+      </>
+    ),
+    [below, home.rooms, home.walls, home.furniture, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape],
   )
 
   return (
@@ -200,60 +266,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         major={dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}
       />
 
-      {below.map(({ id, polygon }) => (
-        <Line
-          key={`below-${id}`}
-          points={flat(polygon)}
-          closed
-          fill={dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}
-          stroke={dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'}
-          strokeWidth={1 / scale}
-          listening={false}
-        />
-      ))}
-
-      {home.rooms.map((room) => {
-        const [cx, cy] = polygonCentroid(room.points)
-        const area = (polygonArea(room.points) / 10000).toLocaleString(undefined, { maximumFractionDigits: 2 })
-        const isSelected = selected.has(room.id)
-        return (
-          <Group key={room.id} listening={false}>
-            <Line
-              points={flat(room.points)}
-              closed
-              fill={dark ? 'rgba(144,202,249,0.10)' : 'rgba(25,118,210,0.07)'}
-              stroke={isSelected ? selectedColor : theme.palette.text.secondary}
-              strokeWidth={(isSelected ? 3 : 1) / scale}
-            />
-            <Text
-              x={cx}
-              y={cy}
-              text={`${room.name ? `${room.name}\n` : ''}${area} m²`}
-              fontSize={fontSize}
-              fill={theme.palette.text.secondary}
-              align="center"
-              width={200 / scale}
-              offsetX={100 / scale}
-              offsetY={fontSize / 2}
-            />
-          </Group>
-        )
-      })}
-
-      {home.walls.map((wall) => wallShape(wall, wallPolygon(wall, wallsById), selected.has(wall.id)))}
-
-      {home.furniture
-        .filter((p) => p.visible)
-        .map((piece) => (
-          <PieceShape
-            key={piece.id}
-            piece={piece}
-            scale={scale}
-            stroke={theme.palette.text.secondary}
-            selected={selected.has(piece.id)}
-            selectedColor={selectedColor}
-          />
-        ))}
+      {shapes}
 
       {preview.wall && wallShape(preview.wall, wallPolygon(preview.wall, wallsById), true, true)}
 

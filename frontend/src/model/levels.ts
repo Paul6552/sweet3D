@@ -20,6 +20,11 @@ export function defaultWallHeight(home: Home, id: string | null): number {
   return findLevel(home, id)?.height ?? home.wallHeight
 }
 
+/** Objekte einer Ebene; {@code undefined} heißt: Projekt ohne Ebenen, alles gehört dazu. */
+export function onLevel<T extends { level: string | null }>(items: T[], level: string | null | undefined): T[] {
+  return level === undefined ? items : items.filter((i) => i.level === level)
+}
+
 /**
  * Sicht auf die gewählte Ebene: nur deren Wände, Räume und Möbel. Plan, Möbelliste und
  * Fangfunktionen arbeiten darauf; Befehle beziehen sich über Ids trotzdem auf das ganze Projekt.

@@ -8,7 +8,7 @@ import { applyCommand, type HomeCommand } from '../model/commands'
 import { pieceFromCatalog } from '../model/furniture'
 import { distance, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
-import { homeOnLevel, levelBelow } from '../model/levels'
+import { homeOnLevel, levelBelow, onLevel } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
 import {
@@ -161,12 +161,15 @@ function cursorFor(handle: Handle | null, overItem: boolean): string {
 export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | null; hint: string }) => void }) {
   const { t } = useTranslation()
   const fullHome = useEditorStore((s) => s.home)!
-  // Der Plan zeigt und bearbeitet nur die gewählte Ebene
-  const home = useMemo(() => homeOnLevel(fullHome), [fullHome])
-  const wallsBelow = useMemo(() => {
-    const below = levelBelow(fullHome)
-    return below ? fullHome.walls.filter((w) => w.level === below.id) : undefined
-  }, [fullHome])
+  // Der Plan zeigt und bearbeitet nur die gewählte Ebene. Die Listen bleiben bei reinen
+  // Kamerabewegungen dieselben, damit der Plan dann nur den Besucher neu zeichnet.
+  const levelId = fullHome.levels.length > 0 ? fullHome.selectedLevel : undefined
+  const walls = useMemo(() => onLevel(fullHome.walls, levelId), [fullHome.walls, levelId])
+  const rooms = useMemo(() => onLevel(fullHome.rooms, levelId), [fullHome.rooms, levelId])
+  const furniture = useMemo(() => onLevel(fullHome.furniture, levelId), [fullHome.furniture, levelId])
+  const home = useMemo(() => ({ ...fullHome, walls, rooms, furniture }), [fullHome, walls, rooms, furniture])
+  const belowId = levelBelow(fullHome)?.id
+  const wallsBelow = useMemo(() => (belowId ? fullHome.walls.filter((w) => w.level === belowId) : undefined), [fullHome.walls, belowId])
   const selection = useEditorStore((s) => s.selection)
   const { mode, magnetism, view, setView, fitRequest } = usePlanStore()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -177,6 +180,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   const [roomPoints, setRoomPoints] = useState<Point[]>([])
   const [cursorStyle, setCursorStyle] = useState('default')
   const spaceHeld = useRef(false)
+  const hovered = useRef(false)
   const pressStart = useRef<{ x: number; y: number } | null>(null)
   const fittedFor = useRef(0)
   const { scale } = view
@@ -262,8 +266,17 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   useEffect(() => {
     const isInput = (event: KeyboardEvent) => (event.target as HTMLElement | null)?.closest('input, textarea') != null
     const onKeyDown = (event: KeyboardEvent) => {
+      const space = event.code === 'Space' || event.key === ' '
+      // Steht die Maus über dem Plan, gehört die Leertaste ihm, auch wenn noch das Suchfeld
+      // oder ein Knopf den Fokus hat (sonst tippt sie dort bzw. löst den Knopf aus)
+      if (space && hovered.current) {
+        if (document.activeElement !== containerRef.current) containerRef.current?.focus()
+        spaceHeld.current = true
+        event.preventDefault()
+        return
+      }
       if (isInput(event)) return
-      if (event.key === ' ') {
+      if (space) {
         spaceHeld.current = true
         event.preventDefault()
       } else if (event.key === 'Escape') {
@@ -275,7 +288,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       }
     }
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key === ' ') spaceHeld.current = false
+      if (event.code === 'Space' || event.key === ' ') spaceHeld.current = false
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -341,6 +354,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   }
 
   const onPointerMove = (event: React.PointerEvent) => {
+    hovered.current = true
     const point = toPlan(event.clientX, event.clientY)
     setPointer({ point, alt: event.altKey })
     if (!gesture) {
@@ -480,7 +494,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={() => setGesture(null)}
-      onPointerLeave={() => !gesture && setPointer(null)}
+      onPointerLeave={() => {
+        hovered.current = false
+        if (!gesture) setPointer(null)
+      }}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => e.preventDefault()}
       onDragOver={(e) => {

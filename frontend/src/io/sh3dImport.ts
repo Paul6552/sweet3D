@@ -59,8 +59,8 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       elevation: num(e, 'elevation') ?? 0,
       floorThickness: num(e, 'floorThickness') ?? DEFAULT_FLOOR_THICKNESS,
       height: num(e, 'height') ?? home.wallHeight,
-      // Ältere Dateien kennen nur „visible“; sichtbar ist eine Ebene, wenn keins von beiden false ist
-      viewable: e.getAttribute('viewable') !== 'false' && e.getAttribute('visible') !== 'false',
+      // „visible“ leitet Sweet Home 3D aus der gewählten Ebene ab; nur „viewable“ stellt der Nutzer ein
+      viewable: e.getAttribute('viewable') !== 'false',
     })),
   )
   const levelIds = new Set(home.levels.map((l) => l.id))

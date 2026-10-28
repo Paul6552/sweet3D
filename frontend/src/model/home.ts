@@ -64,16 +64,43 @@ export interface DoorOrWindowInfo {
   sashes: { xAxis: number; yAxis: number; width: number; startAngle: number; endAngle: number }[]
 }
 
+/** Virtueller Besucher (Augenposition im Plan, Blickrichtung). */
+export interface ObserverCamera {
+  x: number
+  y: number
+  /** Augenhöhe in cm. */
+  z: number
+  /** Blickrichtung im Plan in Radiant (0 = nach rechts, im Uhrzeigersinn, da y nach unten zeigt). */
+  yaw: number
+  /** Neigung nach oben (positiv) bzw. unten. */
+  pitch: number
+  /** Horizontaler Öffnungswinkel in Radiant. */
+  fieldOfView: number
+}
+
+export type CameraMode = 'aerial' | 'observer'
+
 export interface Home {
   formatVersion: 1
   wallHeight: number
   walls: Wall[]
   rooms: Room[]
   furniture: HomePiece[]
+  camera: { mode: CameraMode; observer: ObserverCamera }
 }
 
 export function createEmptyHome(): Home {
-  return { formatVersion: 1, wallHeight: 250, walls: [], rooms: [], furniture: [] }
+  return {
+    formatVersion: 1,
+    wallHeight: 250,
+    walls: [],
+    rooms: [],
+    furniture: [],
+    camera: {
+      mode: 'aerial',
+      observer: { x: 50, y: 50, z: 170, yaw: Math.PI / 4, pitch: 0, fieldOfView: (63 * Math.PI) / 180 },
+    },
+  }
 }
 
 /** Ergänzt fehlende Felder (z. B. bei neuen, noch leeren Projekten aus dem Backend). */
@@ -86,6 +113,7 @@ export function normalizeHome(raw: unknown): Home {
     walls: home.walls ?? [],
     rooms: home.rooms ?? [],
     furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null })),
+    camera: home.camera ?? empty.camera,
   }
 }
 

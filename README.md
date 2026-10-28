@@ -61,7 +61,7 @@ lösen, z. B. 2D-Plan auf Bildschirm 1 und 3D-Ansicht auf Bildschirm 2.
 - [x] Phase 1: Gerüst, Login, Projektverwaltung, Autosave mit Konflikterkennung, abdockbare Panels
 - [x] Phase 2: Möbel- und Texturkatalog (aus den Original-JARs, mehrsprachig), Katalog-Panel mit Suche und Drag & Drop
 - [x] Phase 3: 2D-Planeditor (Wände mit Gehrung und Magnetismus, Räume inkl. automatischer Erkennung, Möbel verschieben/drehen/skalieren, Türen/Fenster rasten in Wände ein, Kopieren/Einfügen)
-- [ ] Phase 4: 3D-Ansicht (react-three-fiber)
+- [x] Phase 4: 3D-Ansicht (react-three-fiber: Wände mit Tür-/Fensteröffnungen, Böden, Möbelmodelle, Luftansicht und virtueller Besucher)
 - [ ] Phase 5: `.sh3d`-Import/-Export, Vorschaubilder
 
 ## Lizenz

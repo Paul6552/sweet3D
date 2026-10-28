@@ -38,7 +38,9 @@ export function PlanPanel() {
   // Tastenkürzel für die Werkzeuge (wie die Buchstaben in den Tooltips)
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement | null)?.closest('input, textarea') || event.ctrlKey || event.metaKey || event.altKey) return
+      // Nicht reagieren, wenn die 3D-Ansicht die Tasten bekommt (W/A/S/D für den Besucher)
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, [data-view3d]') || event.ctrlKey || event.metaKey || event.altKey) return
       const match = MODES.find((m) => m.key.toLowerCase() === event.key.toLowerCase())
       if (match) setMode(match.mode)
     }

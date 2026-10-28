@@ -78,6 +78,10 @@ export const de = {
     },
   },
   view3d: {
+    aerial: 'Luftansicht',
+    observer: 'Virtueller Besucher',
+    aerialHint: 'Ziehen dreht · rechte Maustaste verschiebt · Mausrad zoomt · Klick wählt aus',
+    observerHint: 'Ins Bild klicken, dann W/A/S/D bzw. Pfeiltasten · Umschalt schneller · Ziehen schaut umher',
     placeholder: 'Die 3D-Ansicht folgt in Phase 4.',
     stats: '{{walls}} Wände · {{rooms}} Räume · {{furniture}} Möbel',
   },

@@ -7,9 +7,11 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
 import java.net.URL;
@@ -45,6 +47,13 @@ public class CatalogResource {
     @Path("/textures")
     public TexturesCatalog textures(@QueryParam("lang") String lang, @Context HttpHeaders headers) {
         return catalogService.textures(language(lang, headers));
+    }
+
+    @GET
+    @Path("/default-materials.mtl")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response defaultMaterials() {
+        return Response.ok(catalogService.defaultMaterials()).header(HttpHeaders.CACHE_CONTROL, "public, max-age=86400").build();
     }
 
     @GET

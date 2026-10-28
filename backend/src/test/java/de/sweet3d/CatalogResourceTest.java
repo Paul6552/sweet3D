@@ -41,6 +41,12 @@ class CatalogResourceTest {
     }
 
     @Test
+    void servesDefaultObjMaterials() {
+        given().when().get("/api/catalog/default-materials.mtl")
+                .then().statusCode(200).body(containsString("newmtl white"));
+    }
+
+    @Test
     void refusesResourcesOutsideCatalog() {
         given().when().get("/api/catalog/resource/application.properties").then().statusCode(404);
         given().when().get("/api/catalog/resource/com/eteks/sweethome3d/io/resources/../DefaultFurnitureCatalog.properties")

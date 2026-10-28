@@ -8,6 +8,8 @@ export type EditorAction =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'select'; ids: string[] }
+  /** Kamera ändern; erzeugt keinen Undo-Schritt, wird aber gespeichert und synchronisiert. */
+  | { type: 'camera'; camera: Partial<Omit<Home['camera'], 'observer'>> & { observer?: Partial<Home['camera']['observer']> } }
 
 export type ConnectionState = 'connecting' | 'connected' | 'lost'
 

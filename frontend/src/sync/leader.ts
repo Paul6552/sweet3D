@@ -3,7 +3,7 @@ import { applyCommand } from '../model/commands'
 import type { Home } from '../model/home'
 import { useEditorStore, type EditorAction } from '../store/editorStore'
 import type { PanelId } from '../editor/panelIds'
-import { channelName, PING_INTERVAL_MS, type SyncMessage } from './protocol'
+import { channelName, leaderLockName, type SyncMessage } from './protocol'
 
 enablePatches()
 
@@ -68,6 +68,14 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
         applyAndBroadcast(applyPatches(home, entry.patches), entry.patches)
         break
       }
+      case 'camera': {
+        const [next, patches] = produceWithPatches(home, (draft) => {
+          if (action.camera.mode) draft.camera.mode = action.camera.mode
+          if (action.camera.observer) Object.assign(draft.camera.observer, action.camera.observer)
+        })
+        if (patches.length > 0) applyAndBroadcast(next, patches)
+        break
+      }
       case 'select':
         useEditorStore.setState({ selection: action.ids })
         post({ type: 'selection', ids: action.ids })
@@ -102,7 +110,13 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
     dispatch: handle,
   })
 
-  const ping = window.setInterval(() => post({ type: 'ping' }), PING_INTERVAL_MS)
+  let releaseLock = () => {}
+  void navigator.locks.request(
+    leaderLockName(projectId, leaderId),
+    () => new Promise<void>((resolve) => { releaseLock = resolve }),
+  )
+  // Panel-Fenster, die noch vom vorigen Laden dieser Seite offen sind, verbinden sich neu
+  post({ type: 'leader-ready' })
   const onPageHide = () => post({ type: 'leader-gone' })
   window.addEventListener('pagehide', onPageHide)
 
@@ -111,7 +125,7 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
     dock: (panel: PanelId) => post({ type: 'dock', panel }),
     stop: () => {
       post({ type: 'leader-gone' })
-      window.clearInterval(ping)
+      releaseLock()
       window.removeEventListener('pagehide', onPageHide)
       channel.close()
       useEditorStore.setState({ home: null, dispatch: () => {}, connection: 'connecting' })

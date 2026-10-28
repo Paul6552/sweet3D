@@ -15,12 +15,18 @@ export type SyncMessage =
   | { type: 'selection'; ids: string[] }
   | { type: 'action'; action: EditorAction }
   | { type: 'dock'; panel: PanelId }
-  | { type: 'ping' }
+  | { type: 'leader-ready' }
   | { type: 'leader-gone' }
-
-export const PING_INTERVAL_MS = 2000
-export const PING_TIMEOUT_MS = 6000
 
 export function channelName(projectId: string, leaderId: string): string {
   return `sweet3d:${projectId}:${leaderId}`
+}
+
+/**
+ * Web Lock, den der Leader hält, solange er lebt. Panel-Fenster warten darauf und erkennen so ein
+ * geschlossenes oder abgestürztes Hauptfenster, ohne Timer. Timer werden in Hintergrund-Tabs stark
+ * gedrosselt, ein Ping-Watchdog meldet dort fälschlich einen Verbindungsabbruch.
+ */
+export function leaderLockName(projectId: string, leaderId: string): string {
+  return `sweet3d-leader:${projectId}:${leaderId}`
 }

@@ -1,7 +1,7 @@
 import { applyPatches, enablePatches } from 'immer'
 import { useEditorStore } from '../store/editorStore'
 import type { PanelId } from '../editor/panelIds'
-import { channelName, PING_TIMEOUT_MS, type SyncMessage } from './protocol'
+import { channelName, leaderLockName, type SyncMessage } from './protocol'
 
 enablePatches()
 
@@ -13,10 +13,25 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
   const channel = new BroadcastChannel(channelName(projectId, leaderId))
   const windowId = crypto.randomUUID()
   const post = (message: SyncMessage) => channel.postMessage(message)
-  let lastSeen = Date.now()
+  const abort = new AbortController()
+  let watching = false
 
-  const markAlive = () => {
-    lastSeen = Date.now()
+  /**
+   * Wartet auf den Lock des Leaders. Er wird erst frei, wenn das Hauptfenster geschlossen,
+   * neu geladen oder abgestürzt ist. Erst nach dem Snapshot starten, dann hält der Leader ihn sicher.
+   */
+  const watchLeader = () => {
+    if (watching) return
+    watching = true
+    navigator.locks
+      .request(leaderLockName(projectId, leaderId), { signal: abort.signal }, () => {
+        watching = false
+        useEditorStore.setState({ connection: 'lost' })
+      })
+      .catch(() => { watching = false })
+  }
+
+  const reconnect = () => {
     if (useEditorStore.getState().connection === 'lost') {
       // Hauptfenster wurde neu geladen: neuen Snapshot anfordern
       useEditorStore.setState({ connection: 'connecting' })
@@ -29,7 +44,7 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
     switch (message.type) {
       case 'snapshot':
         if (message.to !== windowId) return
-        lastSeen = Date.now()
+        watchLeader()
         useEditorStore.setState({
           home: message.home,
           selection: message.selection,
@@ -39,7 +54,6 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
         })
         break
       case 'patches': {
-        markAlive()
         const { home } = useEditorStore.getState()
         if (home) {
           useEditorStore.setState({
@@ -51,11 +65,10 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
         break
       }
       case 'selection':
-        markAlive()
         useEditorStore.setState({ selection: message.ids })
         break
-      case 'ping':
-        markAlive()
+      case 'leader-ready':
+        reconnect()
         break
       case 'dock':
         if (message.panel === panel) window.close()
@@ -72,17 +85,12 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
   })
   post({ type: 'hello', windowId, panel })
 
-  const watchdog = window.setInterval(() => {
-    if (Date.now() - lastSeen > PING_TIMEOUT_MS) {
-      useEditorStore.setState({ connection: 'lost' })
-    }
-  }, 1000)
   const onPageHide = () => post({ type: 'bye', windowId, panel })
   window.addEventListener('pagehide', onPageHide)
 
   return {
     stop: () => {
-      window.clearInterval(watchdog)
+      abort.abort()
       window.removeEventListener('pagehide', onPageHide)
       channel.close()
     },

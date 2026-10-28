@@ -1,9 +1,9 @@
 import { useTheme } from '@mui/material/styles'
 import { useMemo } from 'react'
-import { Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
-import type { Home, HomePiece, Wall } from '../model/home'
+import { Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
+import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
 import { polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
-import { handlePoints } from './hitTest'
+import { handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
 import { useImage } from './useImage'
 
@@ -129,6 +129,32 @@ function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: 
   )
 }
 
+/** Virtueller Besucher: Kopf, Blickfeld und Drehgriff. */
+function Observer({ observer, scale, color, paper }: { observer: ObserverCamera; scale: number; color: string; paper: string }) {
+  const length = 150
+  const half = observer.fieldOfView / 2
+  const handle = observerHandle(observer)
+  return (
+    <Group listening={false}>
+      <Line
+        points={[
+          observer.x,
+          observer.y,
+          observer.x + Math.cos(observer.yaw - half) * length,
+          observer.y + Math.sin(observer.yaw - half) * length,
+          observer.x + Math.cos(observer.yaw + half) * length,
+          observer.y + Math.sin(observer.yaw + half) * length,
+        ]}
+        closed
+        fill={color}
+        opacity={0.18}
+      />
+      <Circle x={observer.x} y={observer.y} radius={OBSERVER_RADIUS} fill={color} stroke={paper} strokeWidth={2 / scale} />
+      <Circle x={handle[0]} y={handle[1]} radius={5 / scale} fill={paper} stroke={color} strokeWidth={2 / scale} />
+    </Group>
+  )
+}
+
 /** Zeichnet den Plan in Plankoordinaten (cm); Linienbreiten und Schrift bleiben am Bildschirm konstant. */
 export function PlanRenderer({ home, selection, view, width, height, preview }: PlanRendererProps) {
   const theme = useTheme()
@@ -240,6 +266,8 @@ export function PlanRenderer({ home, selection, view, width, height, preview }: 
           listening={false}
         />
       ))}
+
+      {home.camera.mode === 'observer' && <Observer observer={home.camera.observer} scale={scale} color={selectedColor} paper={theme.palette.background.paper} />}
 
       {preview.rubberBand && (
         <Rect

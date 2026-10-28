@@ -1,4 +1,4 @@
-import type { Home, HomePiece, Wall } from '../model/home'
+import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
 import { distance, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
 
 export type ItemKind = 'piece' | 'wall' | 'room'
@@ -83,4 +83,20 @@ export function homeBounds(home: Home): { minX: number; minY: number; maxX: numb
     maxX: Math.max(...points.map((p) => p[0])),
     maxY: Math.max(...points.map((p) => p[1])),
   }
+}
+
+export const OBSERVER_RADIUS = 20
+
+/** Drehgriff des Besuchers vor seinem Kopf in Blickrichtung. */
+export function observerHandle(observer: ObserverCamera): Point {
+  return [observer.x + Math.cos(observer.yaw) * 70, observer.y + Math.sin(observer.yaw) * 70]
+}
+
+/** Trifft der Punkt den sichtbaren Besucher (Kopf oder Drehgriff)? */
+export function hitObserver(home: Home, point: Point, tolerance: number): 'move' | 'rotate' | null {
+  if (home.camera.mode !== 'observer') return null
+  const observer = home.camera.observer
+  if (distance(observerHandle(observer), point) <= tolerance) return 'rotate'
+  if (distance([observer.x, observer.y], point) <= OBSERVER_RADIUS + tolerance / 2) return 'move'
+  return null
 }

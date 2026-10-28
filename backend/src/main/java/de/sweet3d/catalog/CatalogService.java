@@ -20,6 +20,9 @@ import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.io.File;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -46,6 +49,7 @@ public class CatalogService {
     List<String> languages;
 
     private final Map<String, FurnitureCatalog> furniture = new HashMap<>();
+    private String defaultMaterials;
     private final Map<String, TexturesCatalog> textures = new HashMap<>();
 
     @PostConstruct
@@ -61,9 +65,62 @@ public class CatalogService {
         } finally {
             Locale.setDefault(defaultLocale);
         }
+        defaultMaterials = readDefaultMaterials();
         FurnitureCatalog first = furniture.get(languages.getFirst());
         LOG.infof("Katalog geladen: %d Sprachen, %d Möbel", languages.size(),
                 first.categories().stream().mapToInt(c -> c.pieces().size()).sum());
+    }
+
+    /**
+     * Standard-Materialbibliothek für OBJ-Modelle (Wavefront/Java 3D, z. B. „white“), die viele
+     * Katalogmodelle per usemtl ohne eigene MTL-Datei verwenden.
+     */
+    public String defaultMaterials() {
+        return defaultMaterials;
+    }
+
+    /**
+     * Liest die Konstante JAVA_3D_MATERIALS aus dem Konstantenpool von OBJLoader.class.
+     * Die Klasse selbst lässt sich nicht laden, da sie von Java 3D abhängt.
+     */
+    private static String readDefaultMaterials() {
+        String classFile = "com/eteks/sweethome3d/j3d/OBJLoader.class";
+        try (InputStream raw = Thread.currentThread().getContextClassLoader().getResourceAsStream(classFile)) {
+            if (raw == null) {
+                throw new IOException(classFile + " nicht gefunden");
+            }
+            DataInputStream in = new DataInputStream(raw);
+            in.readInt(); // magic
+            in.readUnsignedShort(); // minor version
+            in.readUnsignedShort(); // major version
+            int count = in.readUnsignedShort();
+            for (int i = 1; i < count; i++) {
+                int tag = in.readUnsignedByte();
+                switch (tag) {
+                    case 1 -> { // Utf8
+                        String value = in.readUTF();
+                        if (value.startsWith("newmtl ")) {
+                            return value;
+                        }
+                    }
+                    case 3, 4, 9, 10, 11, 12, 17, 18 -> in.readInt();
+                    case 5, 6 -> { // Long, Double belegen zwei Einträge
+                        in.readLong();
+                        i++;
+                    }
+                    case 7, 8, 16, 19, 20 -> in.readUnsignedShort();
+                    case 15 -> {
+                        in.readUnsignedByte();
+                        in.readUnsignedShort();
+                    }
+                    default -> throw new IOException("Unbekannter Konstantentyp " + tag);
+                }
+            }
+            throw new IOException("JAVA_3D_MATERIALS nicht gefunden");
+        } catch (IOException e) {
+            LOG.warn("Standard-Materialien aus OBJLoader nicht lesbar, Modelle erscheinen grau", e);
+            return "";
+        }
     }
 
     public FurnitureCatalog furniture(String language) {

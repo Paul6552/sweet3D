@@ -80,6 +80,10 @@ export const en: Resources = {
     },
   },
   view3d: {
+    aerial: 'Aerial view',
+    observer: 'Virtual visitor',
+    aerialHint: 'Drag rotates · right button pans · wheel zooms · click selects',
+    observerHint: 'Click into the view, then W/A/S/D or arrow keys · Shift is faster · drag to look around',
     placeholder: 'The 3D view follows in phase 4.',
     stats: '{{walls}} walls · {{rooms}} rooms · {{furniture}} pieces',
   },

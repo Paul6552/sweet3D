@@ -7,9 +7,9 @@ import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
 import { pieceFromCatalog } from '../model/furniture'
 import { distance, toPieceLocal, wallLength, type Point } from '../model/geometry'
-import { newId, type Home, type HomePiece, type Wall } from '../model/home'
+import { newId, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
-import { handlePoints, hitHandle, hitItem, homeBounds, itemsInRect, type Handle } from './hitTest'
+import { handlePoints, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
 import {
   magnetizeWallEnd,
   normalizeAngle,
@@ -31,6 +31,7 @@ type Gesture =
   | { kind: 'rubberBand'; start: Point; current: Point; base: string[] }
   | { kind: 'move'; start: Point; current: Point; ids: string[]; magnetism: boolean }
   | { kind: 'handle'; handle: Handle; current: Point; magnetism: boolean }
+  | { kind: 'observer'; part: 'move' | 'rotate'; start: Point; camera: ObserverCamera }
 
 /** Wandkette im Wand-Modus: Startpunkt der nächsten Wand und woran sie anschließt. */
 interface WallChain {
@@ -291,6 +292,11 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     pressStart.current = { x: event.clientX, y: event.clientY }
 
     if (mode === 'select') {
+      const observerPart = hitObserver(home, point, HANDLE_TOLERANCE_PX / scale)
+      if (observerPart) {
+        setGesture({ kind: 'observer', part: observerPart, start: point, camera: home.camera.observer })
+        return
+      }
       const handle = hitHandle(home, selection, point, HANDLE_TOLERANCE_PX / scale)
       if (handle) {
         setGesture({ kind: 'handle', handle, current: point, magnetism: magnet })
@@ -332,8 +338,9 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     setPointer({ point, alt: event.altKey })
     if (!gesture) {
       if (mode === 'select' && !spaceHeld.current) {
+        const observerPart = hitObserver(home, point, HANDLE_TOLERANCE_PX / scale)
         const handle = hitHandle(home, selection, point, HANDLE_TOLERANCE_PX / scale)
-        setCursorStyle(cursorFor(handle, hitItem(home, point) !== null))
+        setCursorStyle(observerPart === 'rotate' ? 'grab' : observerPart ? 'move' : cursorFor(handle, hitItem(home, point) !== null))
       } else {
         setCursorStyle(mode === 'pan' || spaceHeld.current ? 'grab' : 'crosshair')
       }
@@ -342,6 +349,16 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     if (gesture.kind === 'pan') {
       setCursorStyle('grabbing')
       setView({ ...gesture.view, x: gesture.view.x + event.clientX - gesture.startX, y: gesture.view.y + event.clientY - gesture.startY })
+      return
+    }
+    if (gesture.kind === 'observer') {
+      // Besucher live bewegen, damit die 3D-Ansicht (auch in anderen Fenstern) mitläuft
+      const { camera, start, part } = gesture
+      const observer =
+        part === 'move'
+          ? { x: round1(camera.x + point[0] - start[0]), y: round1(camera.y + point[1] - start[1]) }
+          : { yaw: magnetism !== event.altKey ? snapAngle(Math.atan2(point[1] - camera.y, point[0] - camera.x)) : Math.atan2(point[1] - camera.y, point[0] - camera.x) }
+      dispatch({ type: 'camera', camera: { observer } })
       return
     }
     // Kleine Zitterbewegungen beim Klicken nicht als Verschieben werten

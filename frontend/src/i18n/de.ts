@@ -62,12 +62,24 @@ export const de = {
     empty: 'Noch keine Möbel im Projekt.',
   },
   plan: {
-    placeholder: 'Der 2D-Planeditor folgt in Phase 3.',
-    addTestWall: 'Testwand hinzufügen',
-    walls: '{{count}} Wände',
+    modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen' },
+    zoomIn: 'Vergrößern',
+    zoomOut: 'Verkleinern',
+    fit: 'Alles zeigen',
+    magnetism: 'Magnetismus (Alt hält ihn vorübergehend an)',
+    hints: {
+      select: 'Klicken wählt aus, Ziehen verschiebt, Rahmen ziehen wählt mehrere · Mausrad zoomt, Leertaste + Ziehen verschiebt die Ansicht',
+      selectHandles: 'Runder Griff dreht, eckiger Griff ändert die Größe bzw. verschiebt das Wandende',
+      pan: 'Ziehen verschiebt die Ansicht',
+      wallStart: 'Klicken setzt den Startpunkt der Wand',
+      wallNext: 'Klicken setzt die nächste Ecke · Doppelklick oder Esc beendet · Alt ohne Magnetismus',
+      roomStart: 'Klicken setzt Eckpunkte · Doppelklick in einen umschlossenen Bereich legt den Raum automatisch an',
+      roomNext: 'Klicken setzt den nächsten Punkt · Doppelklick oder Enter beendet · Esc bricht ab',
+    },
   },
   view3d: {
     placeholder: 'Die 3D-Ansicht folgt in Phase 4.',
+    stats: '{{walls}} Wände · {{rooms}} Räume · {{furniture}} Möbel',
   },
 }
 

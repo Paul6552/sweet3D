@@ -45,7 +45,23 @@ export interface HomePiece {
   icon: string | null
   planIcon: string | null
   doorOrWindow: boolean
+  /** Nur bei Türen und Fenstern gesetzt. */
+  doorOrWindowInfo: DoorOrWindowInfo | null
   color: number | null
+}
+
+/**
+ * Lage einer Tür bzw. eines Fensters in der Wand. Anders als in Sweet Home 3D sind alle Werte
+ * relativ zur Breite bzw. Tiefe des Möbels gespeichert, damit sie beim Skalieren stimmen.
+ */
+export interface DoorOrWindowInfo {
+  /** Anteil der Tiefe, der in der Wand liegt. */
+  wallThickness: number
+  /** Abstand der Wand von der Vorderseite, als Anteil der Tiefe. */
+  wallDistance: number
+  widthDepthDeformable: boolean
+  /** Flügel: Drehachse und Breite relativ zu Breite/Tiefe, Winkel in Radiant. */
+  sashes: { xAxis: number; yAxis: number; width: number; startAngle: number; endAngle: number }[]
 }
 
 export interface Home {
@@ -69,7 +85,7 @@ export function normalizeHome(raw: unknown): Home {
     wallHeight: home.wallHeight ?? empty.wallHeight,
     walls: home.walls ?? [],
     rooms: home.rooms ?? [],
-    furniture: home.furniture ?? [],
+    furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null })),
   }
 }
 

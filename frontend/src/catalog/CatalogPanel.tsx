@@ -48,7 +48,7 @@ export function CatalogPanel() {
   // Bis der 2D-Plan (Phase 3) Drag & Drop unterstützt, fügt ein Doppelklick das Möbel versetzt ein
   const addToHome = (piece: CatalogPiece) => {
     const offset = (pieceCount % 10) * 30
-    executeCommand({ type: 'addFurniture', pieces: [pieceFromCatalog(piece, 100 + offset, 100 + offset)] })
+    executeCommand({ type: 'addItems', furniture: [pieceFromCatalog(piece, 100 + offset, 100 + offset)] })
   }
 
   if (error) {

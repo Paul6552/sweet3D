@@ -64,11 +64,23 @@ export const en: Resources = {
     empty: 'No furniture in this project yet.',
   },
   plan: {
-    placeholder: 'The 2D plan editor follows in phase 3.',
-    addTestWall: 'Add test wall',
-    walls: '{{count}} walls',
+    modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms' },
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fit: 'Show all',
+    magnetism: 'Magnetism (hold Alt to suspend)',
+    hints: {
+      select: 'Click selects, drag moves, drag a frame to select several · Wheel zooms, Space + drag pans',
+      selectHandles: 'Round handle rotates, square handle resizes or moves the wall end',
+      pan: 'Drag to pan the view',
+      wallStart: 'Click to set the wall start point',
+      wallNext: 'Click sets the next corner · Double-click or Esc finishes · Alt disables magnetism',
+      roomStart: 'Click to set corners · Double-click inside an enclosed area creates the room automatically',
+      roomNext: 'Click sets the next point · Double-click or Enter finishes · Esc cancels',
+    },
   },
   view3d: {
     placeholder: 'The 3D view follows in phase 4.',
+    stats: '{{walls}} walls · {{rooms}} rooms · {{furniture}} pieces',
   },
 }

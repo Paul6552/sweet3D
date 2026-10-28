@@ -20,6 +20,13 @@ export function pieceFromCatalog(piece: CatalogPiece, x: number, y: number): Hom
     icon: piece.icon,
     planIcon: piece.planIcon,
     doorOrWindow: piece.doorOrWindow !== null,
+    doorOrWindowInfo: piece.doorOrWindow && {
+      wallThickness: piece.doorOrWindow.wallThickness,
+      wallDistance: piece.doorOrWindow.wallDistance,
+      widthDepthDeformable: piece.doorOrWindow.widthDepthDeformable,
+      // Sweet Home 3D liefert die Flügel bereits relativ zu Breite bzw. Tiefe
+      sashes: piece.doorOrWindow.sashes,
+    },
     color: piece.color,
   }
 }

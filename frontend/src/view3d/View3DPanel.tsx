@@ -8,7 +8,6 @@ import { useEditorStore } from '../store/editorStore'
 export function View3DPanel() {
   const { t } = useTranslation()
   const home = useEditorStore((s) => s.home)
-  const selection = useEditorStore((s) => s.selection)
   if (!home) return null
   return (
     <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', textAlign: 'center', color: 'text.secondary', p: 2 }}>
@@ -16,7 +15,7 @@ export function View3DPanel() {
         <ViewInArOutlined sx={{ fontSize: 64, opacity: 0.4 }} />
         <Typography>{t('view3d.placeholder')}</Typography>
         <Typography variant="caption" component="p" data-testid="view3d-stats">
-          {t('plan.walls', { count: home.walls.length })} · {home.furniture.length} {t('panels.furniture')} · {selection.length} ✓
+          {t('view3d.stats', { walls: home.walls.length, rooms: home.rooms.length, furniture: home.furniture.length })}
         </Typography>
       </div>
     </Box>

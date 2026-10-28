@@ -8,8 +8,10 @@ import { PanelFrame } from './PanelFrame'
 import type { PanelId } from './panelIds'
 import { PANELS } from './panels'
 
+// Die Bibliothek setzt flex inline auf 0 0 auto, daher die Größe je Ausrichtung festlegen
 const separatorSx = {
-  flex: '0 0 4px',
+  '&[aria-orientation="vertical"]': { width: 4 },
+  '&[aria-orientation="horizontal"]': { height: 4 },
   bgcolor: 'divider',
   transition: 'background-color 120ms',
   '&:hover, &[data-separator-state="active"]': { bgcolor: 'primary.main' },

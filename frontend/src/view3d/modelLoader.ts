@@ -1,15 +1,16 @@
-import { Box3, DoubleSide, Group, Material, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three'
+import { Box3, DoubleSide, Group, LoadingManager, Material, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { resolveRef } from '../model/contents'
 
 type MaterialCreator = ReturnType<MTLLoader['parse']>
 
 let defaultMaterials: Promise<MaterialCreator> | null = null
 const models = new Map<string, Promise<Group>>()
 
-/** Standard-Materialien der Katalogmodelle (z. B. „white“), siehe CatalogService im Backend. */
+/** Standard-Materialien der Katalogmodelle (z. B. „white“), siehe scripts/build-catalog.mjs. */
 function loadDefaultMaterials(): Promise<MaterialCreator> {
-  defaultMaterials ??= fetch('/api/catalog/default-materials.mtl')
+  defaultMaterials ??= fetch('/catalog/default-materials.mtl')
     .then((r) => r.text())
     .then((text) => {
       const creator = new MTLLoader().parse(text, '')
@@ -22,17 +23,23 @@ function loadDefaultMaterials(): Promise<MaterialCreator> {
 /**
  * Lädt ein OBJ-Modell samt Materialien (eigene MTL-Datei per mtllib, sonst die
  * Standard-Materialien) einmal pro Fenster. Liefert das ungeänderte Modell.
+ * {@code ref} ist eine Katalog-URL oder ein Verweis auf importierten Inhalt; dessen Schlüssel
+ * sind eindeutig, daher taugt der Verweis auch als Cache-Schlüssel.
  */
-function loadObj(url: string): Promise<Group> {
-  let model = models.get(url)
+function loadObj(ref: string, contents: Record<string, string>): Promise<Group> {
+  let model = models.get(ref)
   if (!model) {
     model = (async () => {
-      const base = url.substring(0, url.lastIndexOf('/') + 1)
-      const [text, defaults] = await Promise.all([fetch(url).then((r) => r.text()), loadDefaultMaterials()])
+      const resolve = (url: string) => resolveRef(contents, url) ?? url
+      const base = ref.substring(0, ref.lastIndexOf('/') + 1)
+      const [text, defaults] = await Promise.all([fetch(resolve(ref)).then((r) => r.text()), loadDefaultMaterials()])
       const library = /^mtllib\s+(.+)$/m.exec(text)?.[1]?.trim()
       let own: MaterialCreator | null = null
       if (library) {
-        const loader = new MTLLoader().setPath(base).setResourcePath(base)
+        // MTL-Datei und Texturen relativ zum Modell, bei importierten Modellen aus den Inhalten
+        const manager = new LoadingManager()
+        manager.setURLModifier(resolve)
+        const loader = new MTLLoader(manager).setPath(base).setResourcePath(base)
         own = await loader.loadAsync(library).catch(() => null)
         own?.preload()
       }
@@ -53,7 +60,7 @@ function loadObj(url: string): Promise<Group> {
       })
       return object
     })()
-    models.set(url, model)
+    models.set(ref, model)
   }
   return model
 }
@@ -62,8 +69,13 @@ function loadObj(url: string): Promise<Group> {
  * Modell für ein Möbel wie in Sweet Home 3D (ModelManager): Modellrotation anwenden, dann so
  * skalieren, dass es genau width × height × depth einnimmt, unten mittig am Ursprung.
  */
-export async function loadNormalizedModel(url: string, modelRotation: number[][] | null, size: { width: number; height: number; depth: number }): Promise<Object3D> {
-  const source = await loadObj(url)
+export async function loadNormalizedModel(
+  ref: string,
+  contents: Record<string, string>,
+  modelRotation: number[][] | null,
+  size: { width: number; height: number; depth: number },
+): Promise<Object3D> {
+  const source = await loadObj(ref, contents)
   const rotated = new Group()
   const clone = source.clone(true)
   if (modelRotation) {

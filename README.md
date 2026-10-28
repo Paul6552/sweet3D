@@ -1,48 +1,51 @@
 # Sweet3D
 
-Selbst gehostete Web-Version von [Sweet Home 3D](https://www.sweethome3d.com):
-React-Frontend, Quarkus-Backend, PostgreSQL und Keycloak, alles in eigenen Containern.
+Web-Version von [Sweet Home 3D](https://www.sweethome3d.com), die komplett im Browser läuft:
+kein Server, kein Login, keine Datenbank. Projekte liegen im `localStorage` des Browsers und lassen sich als
+`.sh3d` herunterladen und mit der Desktop-App austauschen.
 
 | Ordner | Inhalt |
 |---|---|
-| `frontend/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, keycloak-js |
-| `backend/` | Quarkus 3.40 (Java 21), REST-API, Flyway, OIDC; nutzt `SweetHome3D.jar`, `Furniture.jar`, `Textures.jar` (in `backend/libs`) |
-| `docker/` | Init-Skript für Postgres (Datenbanken `sweet3d`, `keycloak`, `sweet3d_test`), Keycloak-Realm `sweet3d` |
-
-## Container
-
-Alle Container gehören zum Compose-Projekt `sweet3d` und teilen sich nichts mit anderen Projekten.
-
-| Container | Port (nur localhost) | Zweck |
-|---|---|---|
-| `sweet3d-postgres` (postgres:18) | 5442 | Daten der App **und** von Keycloak (getrennte DBs und Benutzer) |
-| `sweet3d-keycloak` (26.8.1) | 8190 | Login, Realm `sweet3d`, Admin-Konsole unter `/admin` |
-| `sweet3d-backend` (Profil `prod`) | 8180 | Quarkus mit eingebautem Frontend |
-
-Zugangsdaten liegen in `.env` (nicht versioniert, Vorlage: `.env.example`).
-Testnutzer im Realm: `alice` / `alice` und `bob` / `bob`.
+| `frontend/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP) |
+| `frontend/vendor/sh3d/` | `Furniture.jar`, `Textures.jar`, `SweetHome3D.jar` aus der Sweet Home 3D 7.5 Distribution |
+| `frontend/scripts/build-catalog.mjs` | erzeugt daraus den Katalog als statische Dateien in `frontend/public/catalog` |
 
 ## Entwicklung
 
 ```bash
-docker compose up -d sweet3d-postgres sweet3d-keycloak
-cd backend  && ./mvnw quarkus:dev          # http://localhost:8180 (API)
-cd frontend && npm install && npm run dev  # http://localhost:5173 (leitet /api an 8180 weiter)
+cd frontend
+npm install
+npm run dev     # http://localhost:5173, erzeugt vorher den Katalog
+npm run build   # statische Seite in dist/
+npm run lint
 ```
 
-Tests: `cd backend && ./mvnw test` (nutzt die Datenbank `sweet3d_test`), `cd frontend && npm run build && npm run lint`.
+`npm run catalog` erzeugt den Katalog neu (nur nötig, wenn die JARs in `vendor/sh3d` ersetzt werden;
+`dev` und `build` erledigen das automatisch, sobald sich etwas geändert hat).
 
-## Produktion
+## Selbst hosten
+
+`frontend/dist` ist eine statische Seite und läuft auf jedem Webserver. Für die Adressen `/editor/...`
+muss der Server unbekannte Pfade mit `index.html` beantworten (siehe `frontend/nginx.conf`).
+
+Mit Docker (nginx):
 
 ```bash
-docker compose --profile prod up -d --build   # http://localhost:8180
+docker compose up -d --build   # http://localhost:8180
 ```
 
-Für den Betrieb im Internet:
-- Einen HTTPS-Reverse-Proxy davorschalten.
-- In `docker-compose.yml` `KC_HOSTNAME` und `QUARKUS_OIDC_TOKEN_ISSUER` auf die öffentliche Keycloak-URL setzen.
-- Im Realm die Redirect-URIs des Clients `sweet3d-frontend` anpassen und `frontend/.env.production` entsprechend ändern.
-- Keycloak läuft hier noch im Modus `start-dev`; für den Internetbetrieb auf `start` mit HTTPS umstellen.
+## Projekte und Dateien
+
+- Beim Öffnen startet direkt der Editor mit dem zuletzt bearbeiteten Projekt (beim ersten Mal mit einem neuen).
+- Über das Ordner-Symbol oben links: Projekte anlegen, öffnen, umbenennen, duplizieren, löschen und `.sh3d` importieren.
+- Änderungen werden automatisch im Browser gespeichert. Der `localStorage` fasst je nach Browser etwa 5 MB;
+  die Belegung steht im Projektdialog. Ist er voll, erscheint ein Hinweis.
+- Herunterladen als `.sh3d` über das Download-Symbol in der Werkzeugleiste oder im Projektdialog.
+  Die Datei enthält `Home.xml` und die Modelle und öffnet sich in Sweet Home 3D ab Version 5.3.
+- Import: Dateien aus Sweet Home 3D ab 5.3. Möbel aus dem Standardkatalog nutzen dessen Modelle, andere Modelle
+  werden ins Projekt übernommen (OBJ). Bei mehreren Ebenen wird nur die unterste übernommen.
+- Die Daten gehören zum Browser und zur Adresse der Seite: ein anderer Browser oder Rechner sieht sie nicht.
+  Zum Sichern oder Weitergeben `.sh3d` herunterladen.
 
 ## Ansichten auf mehreren Bildschirmen
 
@@ -58,11 +61,12 @@ lösen, z. B. 2D-Plan auf Bildschirm 1 und 3D-Ansicht auf Bildschirm 2.
 
 ## Stand und Fahrplan
 
-- [x] Phase 1: Gerüst, Login, Projektverwaltung, Autosave mit Konflikterkennung, abdockbare Panels
-- [x] Phase 2: Möbel- und Texturkatalog (aus den Original-JARs, mehrsprachig), Katalog-Panel mit Suche und Drag & Drop
-- [x] Phase 3: 2D-Planeditor (Wände mit Gehrung und Magnetismus, Räume inkl. automatischer Erkennung, Möbel verschieben/drehen/skalieren, Türen/Fenster rasten in Wände ein, Kopieren/Einfügen)
-- [x] Phase 4: 3D-Ansicht (react-three-fiber: Wände mit Tür-/Fensteröffnungen, Böden, Möbelmodelle, Luftansicht und virtueller Besucher)
-- [ ] Phase 5: `.sh3d`-Import/-Export, Vorschaubilder
+- [x] Gerüst, Projektverwaltung im Browser, Autosave, abdockbare Panels
+- [x] Möbel- und Texturkatalog (aus den Original-JARs, mehrsprachig), Katalog-Panel mit Suche und Drag & Drop
+- [x] 2D-Planeditor (Wände mit Gehrung und Magnetismus, Räume inkl. automatischer Erkennung, Möbel verschieben/drehen/skalieren, Türen/Fenster rasten in Wände ein, Kopieren/Einfügen)
+- [x] 3D-Ansicht (react-three-fiber: Wände mit Tür-/Fensteröffnungen, Böden, Möbelmodelle, Luftansicht und virtueller Besucher)
+- [x] `.sh3d`-Import und -Download
+- [ ] Ebenen, Maßlinien und Texte, Eigenschaftsdialoge (Farben, Texturen), Vorschaubilder
 
 ## Lizenz
 

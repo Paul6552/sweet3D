@@ -1,14 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// Im Dev-Modus laufen die API-Aufrufe über den Proxy zum Quarkus-Backend (Port 8180).
+// Reine Browser-Anwendung: der Katalog liegt als statische Dateien in public/catalog
+// (erzeugt von scripts/build-catalog.mjs, siehe predev/prebuild in package.json).
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     strictPort: true,
-    proxy: {
-      '/api': 'http://localhost:8180',
-    },
   },
 })

@@ -1,6 +1,6 @@
-.env
 .idea/
 *.iml
-backend/target/
 frontend/node_modules/
 frontend/dist/
+# Aus vendor/sh3d erzeugt (npm run catalog)
+frontend/public/catalog/

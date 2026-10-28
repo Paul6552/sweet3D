@@ -1,8 +1,9 @@
-import ArrowBack from '@mui/icons-material/ArrowBack'
 import CallReceived from '@mui/icons-material/CallReceived'
-import CloudDoneOutlined from '@mui/icons-material/CloudDoneOutlined'
-import CloudOffOutlined from '@mui/icons-material/CloudOffOutlined'
-import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined'
+import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined'
+import DownloadOutlined from '@mui/icons-material/DownloadOutlined'
+import ErrorOutlined from '@mui/icons-material/ErrorOutlined'
+import FolderOpenOutlined from '@mui/icons-material/FolderOpenOutlined'
+import SyncOutlined from '@mui/icons-material/SyncOutlined'
 import Redo from '@mui/icons-material/Redo'
 import Undo from '@mui/icons-material/Undo'
 import WebAssetOutlined from '@mui/icons-material/WebAssetOutlined'
@@ -11,17 +12,16 @@ import AppBar from '@mui/material/AppBar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
 import IconButton from '@mui/material/IconButton'
-import Stack from '@mui/material/Stack'
 import Toolbar from '@mui/material/Toolbar'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { Link, useParams } from '@tanstack/react-router'
+import { Navigate, useParams } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { projectsApi, type ProjectDetail } from '../api/projects'
-import { normalizeHome } from '../model/home'
+import { downloadSh3d } from '../projects/projectFiles'
+import { ProjectsDialog } from '../projects/ProjectsDialog'
+import { getProject, setLastProject } from '../storage/projects'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { startLeader } from '../sync/leader'
 import { closedPanelWindows, focusPanelWindow, leaderIdFor, loadDetachedPanels, openPanelWindow } from '../sync/windows'
@@ -38,49 +38,68 @@ const RESTORE_DELAY_MS = 1500
 
 function SaveIndicator({ state }: { state: SaveState }) {
   const { t } = useTranslation()
-  if (state === 'error' || state === 'conflict') {
-    return (
-      <Tooltip title={state === 'conflict' ? t('editor.conflict') : ''}>
-        <Chip size="small" color="error" icon={<CloudOffOutlined />} label={t('editor.saveError')} />
-      </Tooltip>
-    )
+  if (state === 'error') {
+    return <Chip size="small" color="error" icon={<ErrorOutlined />} label={t('editor.saveError')} />
   }
   const saved = state === 'saved'
   return (
     <Chip
       size="small"
       variant="outlined"
-      icon={saved ? <CloudDoneOutlined /> : <CloudSyncOutlined />}
+      icon={saved ? <CheckCircleOutlined /> : <SyncOutlined />}
       label={saved ? t('editor.saved') : t('editor.saving')}
     />
   )
 }
 
-/** Hauptfenster des Editors: lädt das Projekt, ist Leader für alle herausgelösten Panels. */
+/** Hauptfenster des Editors: lädt das Projekt aus dem Browser, ist Leader für alle herausgelösten Panels. */
 export function EditorPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const notify = useNotify()
   const { projectId } = useParams({ from: '/editor/$projectId' })
   const leaderId = useMemo(() => leaderIdFor(projectId), [projectId])
-  const [project, setProject] = useState<ProjectDetail | null>(null)
-  const [loadError, setLoadError] = useState(false)
+  // Nur der Anfangsstand; danach gilt der Editor-Store, den useAutosave zurückschreibt
+  const project = useMemo(() => getProject(projectId), [projectId])
+  const [renamed, setRenamed] = useState<{ id: string; name: string } | null>(null)
+  const name = renamed?.id === projectId ? renamed.name : (project?.summary.name ?? '')
+  const [projectsOpen, setProjectsOpen] = useState(false)
+  const [openElsewhere, setOpenElsewhere] = useState(false)
   const [restorable, setRestorable] = useState<PanelId[]>([])
   const detached = useLayoutStore((s) => s.detached)
   const leader = useLayoutStore((s) => s.leader)
   const setDetached = useLayoutStore((s) => s.setDetached)
   const canUndo = useEditorStore((s) => s.canUndo)
   const canRedo = useEditorStore((s) => s.canRedo)
-  const saveState = useAutosave(projectId, project?.version ?? null)
+  const saveState = useAutosave(project ? projectId : null)
   useShortcuts()
 
   useEffect(() => {
-    let cancelled = false
-    projectsApi.get(projectId).then(
-      (p) => !cancelled && setProject(p),
-      () => !cancelled && setLoadError(true),
-    )
+    if (project) setLastProject(projectId)
+  }, [project, projectId])
+
+  // Dasselbe Projekt in zwei Tabs würde sich beim Speichern gegenseitig überschreiben. Ein belegter
+  // Lock kann auch vom gerade verlassenen Editor dieses Tabs stammen, daher erst nach Wiederholungen warnen.
+  useEffect(() => {
+    const abort = new AbortController()
+    let retry: number | undefined
+    const attempt = (remaining: number) => {
+      navigator.locks
+        .request(`sweet3d-project:${projectId}`, { ifAvailable: true }, (lock) => {
+          if (abort.signal.aborted) return
+          if (!lock && remaining > 0) {
+            retry = window.setTimeout(() => attempt(remaining - 1), 250)
+            return
+          }
+          setOpenElsewhere(lock === null)
+          // Lock bis zum Verlassen des Projekts halten
+          return lock && new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve()))
+        })
+        .catch(() => {})
+    }
+    attempt(4)
     return () => {
-      cancelled = true
+      abort.abort()
+      window.clearTimeout(retry)
     }
   }, [projectId])
 
@@ -88,7 +107,7 @@ export function EditorPage() {
     if (!project) return
     const previouslyDetached = loadDetachedPanels()
     const layout = useLayoutStore.getState()
-    const started = startLeader(projectId, leaderId, normalizeHome(project.home), {
+    const started = startLeader(projectId, leaderId, project.home, {
       onPanelOpened: (panel) => layout.setDetached(panel, true),
       onPanelClosed: (panel) => layout.setDetached(panel, false),
     })
@@ -112,8 +131,19 @@ export function EditorPage() {
   }, [project, projectId, leaderId])
 
   useEffect(() => {
-    document.title = project ? `${project.name} – Sweet3D` : 'Sweet3D'
-  }, [project])
+    document.title = name ? `${name} – Sweet3D` : 'Sweet3D'
+  }, [name])
+
+  const download = async () => {
+    const home = useEditorStore.getState().home
+    if (!home) return
+    try {
+      await downloadSh3d(home, name, i18n.resolvedLanguage ?? 'de')
+    } catch (error) {
+      console.error(error)
+      notify(t('projects.downloadError'))
+    }
+  }
 
   const restoreNext = () => {
     // Browser erlauben meist nur ein Pop-up pro Klick: je Klick ein Fenster
@@ -126,31 +156,29 @@ export function EditorPage() {
     }
   }
 
-  if (loadError) {
-    return <Alert severity="error" sx={{ m: 2 }}>{t('projects.loadError')}</Alert>
+  if (!project) {
+    // Unbekanntes oder gelöschtes Projekt: zum zuletzt bearbeiteten bzw. einem neuen
+    return <Navigate to="/" replace />
   }
-  if (!project || !leader) {
-    return (
-      <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <CircularProgress size={20} /> <span>{t('editor.loading')}</span>
-        </Stack>
-      </Box>
-    )
-  }
+  if (!leader) return null
 
   return (
     <EditorContext.Provider value={{ projectId, leaderId, leader }}>
       <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <AppBar position="static" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Toolbar variant="dense" sx={{ gap: 1 }}>
-            <Tooltip title={t('editor.back')}>
-              <IconButton edge="start" component={Link} to="/projects" aria-label={t('editor.back')}>
-                <ArrowBack />
+            <Tooltip title={t('editor.projects')}>
+              <IconButton edge="start" onClick={() => setProjectsOpen(true)} aria-label={t('editor.projects')}>
+                <FolderOpenOutlined />
               </IconButton>
             </Tooltip>
-            <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600, mr: 1 }}>
-              {project.name}
+            <Typography
+              variant="subtitle1"
+              noWrap
+              sx={{ fontWeight: 600, mr: 1, cursor: 'pointer' }}
+              onClick={() => setProjectsOpen(true)}
+            >
+              {name}
             </Typography>
             <Tooltip title={`${t('editor.undo')} (Strg+Z)`}>
               <span>
@@ -190,22 +218,35 @@ export function EditorPage() {
                 {t('editor.restoreWindows')} ({restorable.length})
               </Button>
             )}
+            <Tooltip title={t('projects.download')}>
+              <IconButton size="small" onClick={() => void download()} aria-label={t('projects.download')}>
+                <DownloadOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <SaveIndicator state={saveState} />
           </Toolbar>
         </AppBar>
-        {saveState === 'conflict' && (
-          <Alert
-            severity="warning"
-            square
-            action={<Button color="inherit" size="small" onClick={() => window.location.reload()}>{t('editor.reload')}</Button>}
-          >
-            {t('editor.conflict')}
+        {saveState === 'error' && (
+          <Alert severity="error" square>
+            {t('editor.storageFull')}
+          </Alert>
+        )}
+        {openElsewhere && (
+          <Alert severity="warning" square>
+            {t('editor.openElsewhere')}
           </Alert>
         )}
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <EditorLayout />
         </Box>
       </Box>
+      {projectsOpen && (
+        <ProjectsDialog
+          onClose={() => setProjectsOpen(false)}
+          currentId={projectId}
+          onRenamed={(newName) => setRenamed({ id: projectId, name: newName })}
+        />
+      )}
     </EditorContext.Provider>
   )
 }

@@ -1,6 +1,4 @@
-import axios from 'axios'
-
-/** Möbelstück aus dem Katalog (Maße in cm), siehe CatalogDtos im Backend. */
+/** Möbelstück aus dem Katalog (Maße in cm), erzeugt von scripts/build-catalog.mjs. */
 export interface CatalogPiece {
   id: string
   name: string
@@ -47,10 +45,24 @@ export interface TexturesCatalog {
   }[]
 }
 
-// Der Katalog ist öffentlich, daher ohne Token
+/** Sprachen, für die scripts/build-catalog.mjs einen Katalog erzeugt. */
+export const CATALOG_LANGUAGES = ['de', 'en', 'fr', 'es', 'it']
+
+function catalogLanguage(lang: string): string {
+  const base = lang.split('-')[0]
+  return CATALOG_LANGUAGES.includes(base) ? base : 'en'
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`)
+  return (await response.json()) as T
+}
+
+/** Der Katalog liegt als statische Dateien unter /catalog (aus den Sweet Home 3D-JARs erzeugt). */
 export const catalogApi = {
-  furniture: (lang: string) =>
-    axios.get<FurnitureCatalog>('/api/catalog/furniture', { params: { lang } }).then((r) => r.data),
-  textures: (lang: string) =>
-    axios.get<TexturesCatalog>('/api/catalog/textures', { params: { lang } }).then((r) => r.data),
+  furniture: (lang: string) => getJson<FurnitureCatalog>(`/catalog/furniture-${catalogLanguage(lang)}.json`),
+  textures: (lang: string) => getJson<TexturesCatalog>(`/catalog/textures-${catalogLanguage(lang)}.json`),
+  /** Dateien mehrteiliger Modelle je Verzeichnis, z. B. „/catalog/resources/curtains/“. */
+  modelParts: () => getJson<Record<string, string[]>>('/catalog/model-parts.json'),
 }

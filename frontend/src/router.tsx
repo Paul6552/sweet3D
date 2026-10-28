@@ -1,19 +1,20 @@
 import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router'
 import { EditorPage } from './editor/EditorPage'
 import { PanelWindowPage } from './editor/PanelWindowPage'
-import { ProjectsPage } from './projects/ProjectsPage'
+import i18n from './i18n'
+import { createProject, lastProjectId, listProjects } from './storage/projects'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
+/** Startseite: öffnet das zuletzt bearbeitete Projekt bzw. legt beim ersten Start eines an. */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    throw redirect({ to: '/projects' })
+    const projectId = lastProjectId() ?? listProjects()[0]?.id ?? createProject(i18n.t('projects.defaultName')).id
+    throw redirect({ to: '/editor/$projectId', params: { projectId }, replace: true })
   },
 })
-
-const projectsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects', component: ProjectsPage })
 
 const editorRoute = createRoute({ getParentRoute: () => rootRoute, path: '/editor/$projectId', component: EditorPage })
 
@@ -25,7 +26,7 @@ const panelRoute = createRoute({
   component: PanelWindowPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, editorRoute, panelRoute])
+const routeTree = rootRoute.addChildren([indexRoute, editorRoute, panelRoute])
 
 export const router = createRouter({ routeTree })
 

@@ -1,10 +1,27 @@
-import { Box3, Group, LoadingManager, type Material, Matrix4, Mesh, MeshStandardMaterial, DoubleSide, TextureLoader, Vector3, type Object3D } from 'three'
+import {
+  Box3,
+  BufferAttribute,
+  BufferGeometry,
+  DoubleSide,
+  Group,
+  InstancedMesh,
+  LoadingManager,
+  type Material,
+  Matrix4,
+  Mesh,
+  MeshStandardMaterial,
+  SkinnedMesh,
+  TextureLoader,
+  Vector3,
+  type Object3D,
+} from 'three'
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { KMZLoader } from 'three/examples/jsm/loaders/KMZLoader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { TDSLoader } from 'three/examples/jsm/loaders/TDSLoader.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { CONTENT_PREFIX, contentKey, isContentRef } from '../model/contents'
 import { contentUrl, contentUrlsWithPrefix } from '../storage/contents'
 import { type MtlInfo, toPbr } from './materials'
@@ -84,13 +101,112 @@ function loadModel(ref: string): Promise<Group> {
         child.castShadow = true
         child.receiveShadow = true
       })
-      return object
+      return mergeByMaterial(object)
     })()
     // Fehlgeschlagene Ladevorgänge nicht merken, damit z. B. ein später importierter Katalog greift
     model.catch(() => models.delete(ref))
     models.set(ref, model)
   }
   return model
+}
+
+/**
+ * Fasst alle Teile eines Modells mit gleichem Material zu einem Mesh zusammen. Katalogmodelle
+ * bestehen oft aus Dutzenden kleiner Teile, und jedes kostet je Bild einen Zeichenaufruf (mit
+ * Schatten zwei). Bei größeren Projekten lastet das schwächere Grafikkarten so aus, dass beim
+ * Bewegen der 3D-Ansicht die ganze Seite flackert.
+ */
+function mergeByMaterial(object: Group): Group {
+  object.updateMatrixWorld(true)
+  const toModel = object.matrixWorld.clone().invert()
+  const parts = new Map<string, { material: Material; geometries: BufferGeometry[]; sources: Mesh[] }>()
+  object.traverse((child) => {
+    // Animierte Modelle unverändert lassen
+    if (!(child instanceof Mesh) || child instanceof SkinnedMesh || child instanceof InstancedMesh) return
+    if (Object.keys(child.geometry.morphAttributes).length > 0) return
+    const matrix = toModel.clone().multiply(child.matrixWorld)
+    const materials: Material[] = Array.isArray(child.material) ? child.material : [child.material]
+    const geometry = flatGeometry(child.geometry)
+    const groups = Array.isArray(child.material) && geometry.groups.length > 0 ? geometry.groups : [{ start: 0, count: Infinity, materialIndex: 0 }]
+    for (const group of groups) {
+      const material = materials[group.materialIndex ?? 0]
+      if (!material) continue
+      const part = sliceGeometry(geometry, group.start, group.count)
+      if (!part) continue
+      part.applyMatrix4(matrix)
+      // Gespiegelte Teile zeichnet three.js sonst mit umgekehrter Vorderseite (falsch beleuchtet)
+      if (matrix.determinant() < 0) reverseWinding(part)
+      // Nur Teile mit gleichen Attributen lassen sich zusammenfügen
+      const attributes = Object.entries(part.attributes)
+        .map(([name, a]) => `${name}:${a.itemSize}:${a.normalized}:${a.array.constructor.name}`)
+        .sort()
+      const key = `${material.uuid}|${attributes.join(',')}`
+      let entry = parts.get(key)
+      if (!entry) parts.set(key, (entry = { material, geometries: [], sources: [] }))
+      entry.geometries.push(part)
+      if (!entry.sources.includes(child)) entry.sources.push(child)
+    }
+  })
+  const merged: Mesh[] = []
+  for (const { material, geometries } of parts.values()) {
+    const geometry = geometries.length === 1 ? geometries[0] : mergeGeometries(geometries)
+    // Lässt sich etwas nicht zusammenfügen, bleibt das Modell, wie es ist
+    if (!geometry) return object
+    const mesh = new Mesh(geometry, material)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    merged.push(mesh)
+  }
+  for (const { sources } of parts.values()) for (const source of sources) source.removeFromParent()
+  if (merged.length > 0) object.add(...merged)
+  return object
+}
+
+/** Geometrie ohne Index und ohne verschachtelte Attribute, damit sich Teile beliebig zusammenfügen lassen. */
+function flatGeometry(source: BufferGeometry): BufferGeometry {
+  const geometry = new BufferGeometry()
+  const index = source.index
+  const count = index ? index.count : (source.getAttribute('position')?.count ?? 0)
+  for (const [name, attribute] of Object.entries(source.attributes)) {
+    const size = attribute.itemSize
+    const ArrayType = attribute.array.constructor as new (length: number) => typeof attribute.array
+    const array = new ArrayType(count * size)
+    for (let i = 0; i < count; i++) {
+      const from = index ? index.getX(i) : i
+      for (let c = 0; c < size; c++) array[i * size + c] = attribute.getComponent(from, c)
+    }
+    geometry.setAttribute(name, new BufferAttribute(array, size, attribute.normalized))
+  }
+  for (const group of source.groups) geometry.addGroup(group.start, group.count, group.materialIndex)
+  return geometry
+}
+
+/** Ausschnitt [start, start + count) einer Geometrie ohne Index. */
+function sliceGeometry(geometry: BufferGeometry, start: number, count: number): BufferGeometry | null {
+  const total = geometry.getAttribute('position')?.count ?? 0
+  const end = Math.min(total, start + count)
+  if (end <= start) return null
+  if (start === 0 && end === total) return geometry.clone()
+  const part = new BufferGeometry()
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    const size = attribute.itemSize
+    part.setAttribute(name, new BufferAttribute(attribute.array.slice(start * size, end * size), size, attribute.normalized))
+  }
+  return part
+}
+
+/** Vertauscht in jedem Dreieck die letzten beiden Ecken. */
+function reverseWinding(geometry: BufferGeometry) {
+  for (const attribute of Object.values(geometry.attributes)) {
+    const { array, itemSize } = attribute
+    for (let t = 0; t + 2 < attribute.count; t += 3) {
+      for (let c = 0; c < itemSize; c++) {
+        const a = (t + 1) * itemSize + c
+        const b = (t + 2) * itemSize + c
+        ;[array[a], array[b]] = [array[b], array[a]]
+      }
+    }
+  }
 }
 
 async function parseModel(format: ModelFormat, bytes: Uint8Array, base: string, manager: LoadingManager): Promise<Group> {

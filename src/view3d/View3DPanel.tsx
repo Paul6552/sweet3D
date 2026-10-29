@@ -107,6 +107,37 @@ function Haze({ bounds }: { bounds: SceneBounds }) {
   return <fog ref={fog} attach="fog" args={[HORIZON, 4000, 60000]} />
 }
 
+/**
+ * Schatten hängen nur von Sonne und Szene ab, nicht von der Kamera: die Schattenkarte wird nur neu
+ * gezeichnet, wenn sich ein Schatten werfendes Teil oder die Sonne ändert (auch wenn ein Modell
+ * nachgeladen wird). Das spart beim Bewegen der Ansicht einen ganzen Durchgang durch die Szene.
+ */
+function ShadowUpdates() {
+  const get = useThree((s) => s.get)
+  const signature = useRef<number | null>(null)
+  useEffect(() => {
+    const { shadowMap } = get().gl
+    shadowMap.autoUpdate = false
+    shadowMap.needsUpdate = true
+    return () => {
+      shadowMap.autoUpdate = true
+    }
+  }, [get])
+  useFrame(({ gl, scene }) => {
+    let hash = 0
+    scene.traverseVisible((object) => {
+      if (!object.castShadow || !('isMesh' in object || 'isLight' in object)) return
+      hash = (Math.imul(hash, 31) + object.id) | 0
+      for (const value of object.matrixWorld.elements) hash = (Math.imul(hash, 31) + Math.round(value * 1000)) | 0
+    })
+    if (hash !== signature.current) {
+      signature.current = hash
+      gl.shadowMap.needsUpdate = true
+    }
+  })
+  return null
+}
+
 /** Ohne WebGL (z. B. vom Browser nach Grafikfehlern gesperrt) nur einen Hinweis statt den Editor abstürzen lassen. */
 class WebGLBoundary extends Component<{ message: string; children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
@@ -246,6 +277,7 @@ export function View3DPanel() {
             <Haze bounds={bounds} />
             <Sky environmentSize={profile.environmentSize} />
             <Lights bounds={bounds} profile={profile} />
+            <ShadowUpdates />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground />
             <HomeScene home={home} selection={selection} selectionColor={theme.palette.primary.main} showCeilings={mode === 'observer'} />

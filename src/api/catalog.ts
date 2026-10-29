@@ -1,3 +1,5 @@
+import type { LightInfo } from '../model/home'
+
 /** Möbelstück aus dem Katalog (Maße in cm), erzeugt von scripts/build-catalog.mjs. */
 export interface CatalogPiece {
   id: string
@@ -30,6 +32,8 @@ export interface CatalogPiece {
     cutOutShape: string | null
     sashes: { xAxis: number; yAxis: number; width: number; startAngle: number; endAngle: number }[]
   } | null
+  /** Nur bei Leuchten. */
+  light?: LightInfo | null
 }
 
 export interface FurnitureCatalog {

@@ -1,8 +1,13 @@
-import { Box3, DoubleSide, Group, LoadingManager, Material, Matrix4, Mesh, MeshStandardMaterial, Vector3, type Object3D } from 'three'
+import { Box3, Group, LoadingManager, type Material, Matrix4, Mesh, MeshStandardMaterial, DoubleSide, TextureLoader, Vector3, type Object3D } from 'three'
+import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { KMZLoader } from 'three/examples/jsm/loaders/KMZLoader.js'
 import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { TDSLoader } from 'three/examples/jsm/loaders/TDSLoader.js'
 import { CONTENT_PREFIX, contentKey, isContentRef } from '../model/contents'
 import { contentUrl, contentUrlsWithPrefix } from '../storage/contents'
+import { type MtlInfo, toPbr } from './materials'
 
 type MaterialCreator = ReturnType<MTLLoader['parse']>
 
@@ -21,49 +26,123 @@ function loadDefaultMaterials(): Promise<MaterialCreator> {
   return defaultMaterials
 }
 
+export type ModelFormat = 'obj' | 'gltf' | 'glb' | 'dae' | '3ds' | 'kmz'
+
 /**
- * Lädt ein OBJ-Modell samt Materialien (eigene MTL-Datei per mtllib, sonst die
- * Standard-Materialien) einmal pro Fenster. Liefert das ungeänderte Modell.
- * {@code ref} ist eine Katalog-URL oder ein Verweis auf importierten Inhalt; dessen Schlüssel
- * sind eindeutig, daher taugt der Verweis auch als Cache-Schlüssel.
+ * Format eines Modells nach Dateiendung, sonst nach den ersten Bytes (importierte einteilige
+ * Modelle haben Schlüssel ohne Dateinamen). Sweet Home 3D kennt OBJ, DAE, 3DS und KMZ.
  */
-function loadObj(ref: string): Promise<Group> {
+export function modelFormat(ref: string, bytes: Uint8Array): ModelFormat {
+  const extension = /\.([a-z0-9]+)$/i.exec(ref)?.[1]?.toLowerCase()
+  if (extension === 'gltf' || extension === 'glb' || extension === 'dae' || extension === '3ds' || extension === 'kmz') return extension
+  if (extension === 'obj') return 'obj'
+  const head = new TextDecoder().decode(bytes.subarray(0, 256))
+  if (head.startsWith('glTF')) return 'glb'
+  if (bytes[0] === 0x4d && bytes[1] === 0x4d) return '3ds'
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) return 'kmz'
+  if (/<COLLADA/i.test(head)) return 'dae'
+  if (/^\s*\{/.test(head) && head.includes('"asset"')) return 'gltf'
+  return 'obj'
+}
+
+/**
+ * Lädt ein Modell samt Materialien einmal pro Fenster und liefert es ungeändert, mit
+ * physikalisch basierten Materialien (siehe toPbr). {@code ref} ist eine Katalog-URL oder ein
+ * Verweis auf importierten Inhalt; dessen Schlüssel sind eindeutig, daher taugt der Verweis auch
+ * als Cache-Schlüssel.
+ */
+function loadModel(ref: string): Promise<Group> {
   let model = models.get(ref)
   if (!model) {
     model = (async () => {
       const resolve = await resolverFor(ref)
       const base = ref.substring(0, ref.lastIndexOf('/') + 1)
-      const [text, defaults] = await Promise.all([fetch(resolve(ref)).then((r) => r.text()), loadDefaultMaterials()])
-      const library = /^mtllib\s+(.+)$/m.exec(text)?.[1]?.trim()
-      let own: MaterialCreator | null = null
-      if (library) {
-        // MTL-Datei und Texturen relativ zum Modell, bei importierten Modellen aus den Inhalten
-        const manager = new LoadingManager()
-        manager.setURLModifier(resolve)
-        const loader = new MTLLoader(manager).setPath(base).setResourcePath(base)
-        own = await loader.loadAsync(library).catch(() => null)
-        own?.preload()
-      }
-      const materials = {
-        create: (name: string) => own?.materials[name] ?? own?.create(name) ?? defaults.create(name),
-        preload: () => {},
-      } as unknown as MaterialCreator
-      const object = new OBJLoader().setMaterials(materials).parse(text)
+      // Texturen und MTL-Dateien relativ zum Modell, bei importierten Modellen aus den Inhalten
+      const manager = new LoadingManager()
+      manager.setURLModifier(resolve)
+      const response = await fetch(resolve(ref))
+      if (!response.ok) throw new Error(`${ref}: HTTP ${response.status}`)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const format = modelFormat(ref, bytes)
+      const object = await parseModel(format, bytes, base, manager)
+      const converted = new Map<Material, Material>()
       object.traverse((child) => {
-        if (child instanceof Mesh) {
-          const list = (Array.isArray(child.material) ? child.material : [child.material]) as Material[]
-          // Viele Katalogmodelle sind nicht geschlossen: beide Seiten zeichnen
-          list.forEach((m) => (m.side = DoubleSide))
-          if (!child.material) child.material = new MeshStandardMaterial({ color: 0xcccccc, side: DoubleSide })
-          child.castShadow = true
-          child.receiveShadow = true
+        if (!(child instanceof Mesh)) return
+        const info = (child.userData.mtl ?? {}) as Record<string, MtlInfo>
+        const convert = (m: Material) => {
+          let result = converted.get(m)
+          if (!result) {
+            result = toPbr(m, info[m.name], (path) => new TextureLoader(manager).load(base + path))
+            result.side = DoubleSide
+            converted.set(m, result)
+          }
+          return result
         }
+        if (!child.material) child.material = new MeshStandardMaterial({ color: 0xcccccc, side: DoubleSide })
+        else child.material = Array.isArray(child.material) ? child.material.map(convert) : convert(child.material)
+        delete child.userData.mtl
+        child.castShadow = true
+        child.receiveShadow = true
       })
       return object
     })()
+    // Fehlgeschlagene Ladevorgänge nicht merken, damit z. B. ein später importierter Katalog greift
+    model.catch(() => models.delete(ref))
     models.set(ref, model)
   }
   return model
+}
+
+async function parseModel(format: ModelFormat, bytes: Uint8Array, base: string, manager: LoadingManager): Promise<Group> {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  switch (format) {
+    case 'gltf':
+    case 'glb': {
+      const gltf = await new GLTFLoader(manager).parseAsync(buffer, base)
+      const group = new Group()
+      group.add(gltf.scene)
+      return group
+    }
+    case 'dae': {
+      const collada = new ColladaLoader(manager).parse(new TextDecoder().decode(bytes), base)
+      if (!collada) throw new Error('Ungültige Collada-Datei')
+      const group = new Group()
+      group.add(collada.scene)
+      return group
+    }
+    case 'kmz': {
+      const group = new Group()
+      group.add(new KMZLoader(manager).parse(buffer).scene)
+      return group
+    }
+    case '3ds':
+      return new TDSLoader(manager).setResourcePath(base).parse(buffer, base)
+    case 'obj':
+      return parseObj(new TextDecoder().decode(bytes), base, manager)
+  }
+}
+
+/** OBJ mit eigener MTL-Datei (mtllib), sonst mit den Standard-Materialien von Sweet Home 3D. */
+async function parseObj(text: string, base: string, manager: LoadingManager): Promise<Group> {
+  const defaults = await loadDefaultMaterials()
+  const library = /^mtllib\s+(.+)$/m.exec(text)?.[1]?.trim()
+  let own: MaterialCreator | null = null
+  if (library) {
+    const loader = new MTLLoader(manager).setPath(base).setResourcePath(base)
+    own = await loader.loadAsync(library).catch(() => null)
+    own?.preload()
+  }
+  const materials = {
+    create: (name: string) => own?.materials[name] ?? own?.create(name) ?? defaults.create(name),
+    preload: () => {},
+  } as unknown as MaterialCreator
+  const object = new OBJLoader().setMaterials(materials).parse(text)
+  // PBR-Erweiterungen der MTL-Datei für toPbr merken
+  const info = (own?.materialsInfo ?? {}) as Record<string, MtlInfo>
+  object.traverse((child) => {
+    if (child instanceof Mesh) child.userData.mtl = info
+  })
+  return object
 }
 
 /**
@@ -94,7 +173,7 @@ export async function loadNormalizedModel(
   modelRotation: number[][] | null,
   size: { width: number; height: number; depth: number },
 ): Promise<Object3D> {
-  const source = await loadObj(ref)
+  const source = await loadModel(ref)
   const rotated = new Group()
   const clone = source.clone(true)
   if (modelRotation) {

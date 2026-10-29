@@ -221,8 +221,17 @@ async function pieceXml(
       widthDepthDeformable: door.widthDepthDeformable ? null : false,
     }),
   }
-  const name = door ? 'doorOrWindow' : 'pieceOfFurniture'
-  const children = [...texture, ...(door?.sashes ?? []).map((sash) => `    ${element('sash', { ...sash })}`)]
+  const light = !door && piece.light ? piece.light : null
+  const name = door ? 'doorOrWindow' : light ? 'light' : 'pieceOfFurniture'
+  if (light) Object.assign(attributes, { power: light.power })
+  // Reihenfolge wie in der DTD von Sweet Home 3D: Flügel bzw. Lichtquellen vor der Textur
+  const children = [
+    ...(door?.sashes ?? []).map((sash) => `    ${element('sash', { ...sash })}`),
+    ...(light?.sources ?? []).map(
+      (source) => `    ${element('lightSource', { x: source.x, y: source.y, z: source.z, color: formatArgb(source.color & 0xffffff), diameter: source.diameter || null })}`,
+    ),
+    ...texture,
+  ]
   return children.length === 0 ? element(name, attributes) : [`${openTag(name, attributes)}>`, ...children, `  </${name}>`].join('\n')
 }
 

@@ -9,6 +9,7 @@ import {
   type Home,
   type HomePiece,
   type Level,
+  type LightInfo,
   type Room,
   type Surface,
   type TextureRef,
@@ -156,6 +157,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       doorOrWindowInfo: doorOrWindow ? doorInfo(e) : null,
       color: parseArgb(e.getAttribute('color')),
       texture: textureOf(e, null),
+      light: e.nodeName === 'light' ? lightInfo(e) : null,
       level,
     }
     home.furniture.push(piece)
@@ -265,6 +267,21 @@ function doorInfo(e: Element): DoorOrWindowInfo {
         width: num(s, 'width') ?? 0,
         startAngle: num(s, 'startAngle') ?? 0,
         endAngle: num(s, 'endAngle') ?? 0,
+      })),
+  }
+}
+
+function lightInfo(e: Element): LightInfo {
+  return {
+    power: num(e, 'power') ?? 0.5,
+    sources: [...e.children]
+      .filter((s) => s.nodeName === 'lightSource')
+      .map((s) => ({
+        x: num(s, 'x') ?? 0.5,
+        y: num(s, 'y') ?? 0.5,
+        z: num(s, 'z') ?? 0.5,
+        color: (parseArgb(s.getAttribute('color')?.replace('#', '') ?? null) ?? 0xffffff) & 0xffffff,
+        diameter: num(s, 'diameter') ?? 0,
       })),
   }
 }

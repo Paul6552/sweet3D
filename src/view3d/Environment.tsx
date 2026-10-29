@@ -1,17 +1,24 @@
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
-import { BackSide, Color, type Mesh, RepeatWrapping, SRGBColorSpace, type Texture, TextureLoader } from 'three'
+import { useEffect, useMemo } from 'react'
+import {
+  CircleGeometry,
+  Mesh,
+  MeshBasicMaterial,
+  PMREMGenerator,
+  RepeatWrapping,
+  Scene,
+  SRGBColorSpace,
+  type Texture,
+  TextureLoader,
+} from 'three'
+import { createSky, ENVIRONMENT_INTENSITY, GROUND_BOUNCE } from './sky'
 
-/** Farbe am Horizont; Nebel und Himmel treffen sich dort, damit der Boden weich ausläuft. */
-export const HORIZON = '#dbe8f2'
-const ZENITH = '#4f8fd0'
 /** Rasen aus dem Texturkatalog von Sweet Home 3D. */
 const GRASS = '/catalog/resources/textures/grass.jpg'
 /** Größe einer Kachel in cm; größer als im Katalog, damit sich das Muster aus der Ferne nicht wiederholt. */
 const GRASS_TILE = 200
 const GROUND_SIZE = 400000
 const SKY_RADIUS = 200000
-
 /**
  * Mischt die Kachel mit einer gedrehten, größeren Kopie von sich selbst, damit aus der Ferne
  * keine Streifen durch die Wiederholung entstehen.
@@ -27,37 +34,54 @@ function mixTiles(shader: { fragmentShader: string }) {
   )
 }
 
-/** Himmelskuppel mit Verlauf vom Horizont zum Zenit; wandert mit der Kamera mit. */
-export function Sky() {
-  const mesh = useRef<Mesh>(null)
-  const uniforms = useMemo(() => ({ horizon: { value: new Color(HORIZON) }, zenith: { value: new Color(ZENITH) } }), [])
-  useFrame(({ camera }) => mesh.current?.position.copy(camera.position))
-  return (
-    <mesh ref={mesh} renderOrder={-1} frustumCulled={false}>
-      <sphereGeometry args={[SKY_RADIUS, 32, 16]} />
-      <shaderMaterial
-        side={BackSide}
-        depthWrite={false}
-        fog={false}
-        uniforms={uniforms}
-        vertexShader={`
-          varying vec3 vDirection;
-          void main() {
-            vDirection = normalize(position);
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-          }`}
-        fragmentShader={`
-          uniform vec3 horizon;
-          uniform vec3 zenith;
-          varying vec3 vDirection;
-          void main() {
-            float h = max(vDirection.y, 0.0);
-            gl_FragColor = vec4(mix(horizon, zenith, pow(h, 0.6)), 1.0);
-            #include <colorspace_fragment>
-          }`}
-      />
-    </mesh>
-  )
+/**
+ * Himmelskuppel, die mit der Kamera mitwandert, und daraus berechnetes Umgebungslicht
+ * (scene.environment): alle physikalisch basierten Materialien werden vom Himmel beleuchtet
+ * und spiegeln ihn je nach Rauheit.
+ */
+export function Sky({ environmentSize }: { environmentSize: number }) {
+  const gl = useThree((s) => s.gl)
+  const get = useThree((s) => s.get)
+  const sky = useMemo(() => {
+    const created = createSky()
+    created.scale.setScalar(SKY_RADIUS)
+    created.renderOrder = -1
+    created.frustumCulled = false
+    // Im Foto-Modus liefert die Umgebung den Himmel
+    created.userData.photo = false
+    return created
+  }, [])
+  useEffect(() => {
+    const generator = new PMREMGenerator(gl)
+    const environment = new Scene()
+    const envSky = createSky()
+    envSky.scale.setScalar(50)
+    // Wolken bewegen sich nicht, damit das Umgebungslicht nur einmal berechnet werden muss
+    envSky.material.uniforms.cloudCoverage.value = 0.25
+    const ground = new Mesh(new CircleGeometry(40, 32), new MeshBasicMaterial({ color: GROUND_BOUNCE }))
+    ground.rotation.x = -Math.PI / 2
+    ground.position.y = -1
+    environment.add(envSky, ground)
+    const target = generator.fromScene(environment, 0, 0.1, 100, { size: environmentSize })
+    const { scene } = get()
+    scene.environment = target.texture
+    scene.environmentIntensity = ENVIRONMENT_INTENSITY
+    return () => {
+      scene.environment = null
+      target.dispose()
+      generator.dispose()
+      envSky.geometry.dispose()
+      envSky.material.dispose()
+      ground.geometry.dispose()
+      ground.material.dispose()
+    }
+  }, [gl, get, environmentSize])
+  useEffect(() => () => {
+    sky.geometry.dispose()
+    sky.material.dispose()
+  }, [sky])
+  useFrame(({ camera }) => sky.position.copy(camera.position))
+  return <primitive object={sky} />
 }
 
 /** Rasenfläche bis zum Horizont, knapp unter dem Fußboden der untersten Ebene; fest am Ursprung, damit das Muster nicht wandert. */

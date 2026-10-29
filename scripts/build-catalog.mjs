@@ -126,6 +126,25 @@ function readFurniture(props, language) {
         })),
       }
     }
+    // Leuchten: Lage der Quellen relativ zu Breite, Tiefe und Höhe, Farben als #RRGGBB
+    let light = null
+    if (get('lightSourceX', i)) {
+      const list = (key) => (get(key, i) ? get(key, i).trim().split(/\s+/) : [])
+      const ys = list('lightSourceY')
+      const zs = list('lightSourceZ')
+      const colors = list('lightSourceColor')
+      const diameters = list('lightSourceDiameter')
+      light = {
+        power: get('lightPower', i) ? float(get('lightPower', i)) : 0.5,
+        sources: list('lightSourceX').map((x, s) => ({
+          x: float(x),
+          y: float(ys[s]),
+          z: float(zs[s]),
+          color: colors[s] ? Number.parseInt(colors[s].replace('#', ''), 16) : 0xffffff,
+          diameter: diameters[s] ? float(diameters[s]) : 0,
+        })),
+      }
+    }
     const piece = {
       id: get('id', i) ?? null,
       name: get('name', i),
@@ -151,6 +170,7 @@ function readFurniture(props, language) {
       color: get('color', i) ? Number.parseInt(get('color', i)) : null,
       staircaseCutOutShape: get('staircaseCutOutShape', i) ?? null,
       doorOrWindow: doorInfo,
+      light,
     }
     const category = get('category', i)
     if (!categories.has(category)) categories.set(category, [])

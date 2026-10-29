@@ -13,6 +13,35 @@ export interface TextureRef {
   image: string
   width: number
   height: number
+  /** Zusätzliche PBR-Karten (gleiche Kachelgröße wie {@code image}); Sweet Home 3D kennt nur das Farbbild. */
+  maps?: TextureMaps
+  /** Bibliothek, aus der die Textur stammt, siehe api/catalog.ts. */
+  libraryId?: string | null
+}
+
+/** Verweise (URL oder „content:…“) auf Graustufen- bzw. Normalenbilder für physikalisch basiertes Rendern. */
+export interface TextureMaps {
+  normal?: string
+  roughness?: string
+  ao?: string
+  metalness?: string
+}
+
+/** Licht eines Möbels wie HomeLight in Sweet Home 3D; Lagen der Quellen relativ zu Breite/Tiefe/Höhe. */
+export interface LightInfo {
+  /** 0 bis 1, Sweet Home 3D: 0,5 Standard. */
+  power: number
+  sources: { x: number; y: number; z: number; color: number; diameter: number }[]
+}
+
+/** Benutzerdefinierte Bibliothek, aus der ein Projekt Möbel oder Texturen verwendet. */
+export interface LibraryInfo {
+  id: string
+  name: string
+  version: string | null
+  provider: string | null
+  /** Bezugsquelle (z. B. URL), damit der Empfänger weiß, woher er den Katalog bekommt. */
+  source: string | null
 }
 
 /**
@@ -107,6 +136,10 @@ export interface HomePiece {
   color: number | null
   /** Textur über das ganze Modell; schließt {@code color} aus. */
   texture?: TextureRef | null
+  /** Nur bei Leuchten gesetzt. */
+  light?: LightInfo | null
+  /** Bibliothek des Katalogeintrags; fehlt bei Möbeln aus dem Standardkatalog. */
+  libraryId?: string | null
   level: string | null
 }
 
@@ -169,6 +202,11 @@ export interface Home {
   dimensionLines: DimensionLine[]
   labels: Label[]
   camera: { mode: CameraMode; observer: ObserverCamera }
+  /**
+   * Benutzerdefinierte Bibliotheken, aus denen Möbel oder Texturen stammen, auch wenn sie hier
+   * nicht installiert sind (z. B. aus einer weitergegebenen Datei), siehe catalog/libraries.ts.
+   */
+  libraries?: LibraryInfo[]
 }
 
 export function createEmptyHome(): Home {

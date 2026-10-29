@@ -1,4 +1,4 @@
-import type { LightInfo } from '../model/home'
+import type { LightInfo, TextureMaps } from '../model/home'
 
 /** Möbelstück aus dem Katalog (Maße in cm), erzeugt von scripts/build-catalog.mjs. */
 export interface CatalogPiece {
@@ -34,6 +34,21 @@ export interface CatalogPiece {
   } | null
   /** Nur bei Leuchten. */
   light?: LightInfo | null
+  /** Bibliothek des Eintrags; fehlt beim Standardkatalog. */
+  libraryId?: string
+}
+
+export interface CatalogTexture {
+  id: string
+  name: string
+  creator: string | null
+  image: string
+  icon: string
+  /** Größe einer Kachel in cm. */
+  width: number
+  height: number
+  maps?: TextureMaps
+  libraryId?: string
 }
 
 export interface FurnitureCatalog {
@@ -43,10 +58,7 @@ export interface FurnitureCatalog {
 
 export interface TexturesCatalog {
   language: string
-  categories: {
-    name: string
-    textures: { id: string; name: string; creator: string | null; image: string; icon: string; width: number; height: number }[]
-  }[]
+  categories: { name: string; textures: CatalogTexture[] }[]
 }
 
 /** Sprachen, für die scripts/build-catalog.mjs einen Katalog erzeugt. */

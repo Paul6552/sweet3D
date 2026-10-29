@@ -9,14 +9,17 @@ import {
   type Home,
   type HomePiece,
   type Level,
+  type LibraryInfo,
   type LightInfo,
   type Room,
   type Surface,
+  type TextureMaps,
   type TextureRef,
   type Wall,
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
+import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, TEXTURE_EXTRAS_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -24,6 +27,20 @@ export interface ImportResult {
   contents: Record<string, Blob>
   /** Hinweis für den Nutzer: Möbel ohne ladbares Modell. */
   missingModels: number
+}
+
+/** Wert eines property-Elements (Sweet Home 3D ab 5.3: name/value) direkt unter {@code parent}. */
+function property(parent: Element, name: string): string | null {
+  return [...parent.children].find((e) => e.nodeName === 'property' && e.getAttribute('name') === name)?.getAttribute('value') ?? null
+}
+
+function parseJson<T>(text: string | null): T | null {
+  if (!text) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
 }
 
 export class Sh3dImportError extends Error {
@@ -113,15 +130,40 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
     return ref
   }
 
-  // Texturen aus dem Standardkatalog verweisen auf dessen Bilder, alle anderen werden übernommen
-  const catalogTextures = new Map((textures?.categories ?? []).flatMap((c) => c.textures).map((t) => [t.id, t.image]))
+  // Bibliotheken, aus denen das Projekt stammt (auch wenn sie hier fehlen), siehe sh3dExport.ts
+  const libraries = parseJson<LibraryInfo[]>(property(root, LIBRARIES_PROPERTY))
+  if (Array.isArray(libraries) && libraries.length > 0) home.libraries = libraries.filter((l) => l && typeof l.id === 'string')
+  const textureExtras = parseJson<TextureExtras>(property(root, TEXTURE_EXTRAS_PROPERTY)) ?? {}
+
+  // Texturen aus dem Katalog (auch importierten Bibliotheken) verweisen auf dessen Bilder, alle anderen werden übernommen
+  const catalogTextures = new Map((textures?.categories ?? []).flatMap((c) => c.textures).map((t) => [t.id, t]))
   const textureOf = (parent: Element, attribute: string | null): TextureRef | null => {
     const e = [...parent.children].find((c) => c.nodeName === 'texture' && c.getAttribute('attribute') === attribute)
     if (!e) return null
     const catalogId = e.getAttribute('catalogId')
-    const image = (catalogId && catalogTextures.get(catalogId)) || content(e.getAttribute('image'))
+    const fromCatalog = catalogId ? catalogTextures.get(catalogId) : undefined
+    const entry = e.getAttribute('image')
+    const image = fromCatalog?.image || content(entry)
     if (!image) return null
-    return { catalogId, name: e.getAttribute('name') ?? '', image, width: num(e, 'width') ?? 100, height: num(e, 'height') ?? 100 }
+    const extras = entry ? textureExtras[entry] : undefined
+    let maps: TextureMaps | undefined = fromCatalog?.maps
+    if (!fromCatalog && extras?.maps) {
+      maps = {}
+      for (const [kind, name] of Object.entries(extras.maps) as [keyof TextureMaps, string][]) {
+        const ref = content(name)
+        if (ref) maps[kind] = ref
+      }
+    }
+    const libraryId = fromCatalog?.libraryId ?? extras?.libraryId
+    return {
+      catalogId,
+      name: e.getAttribute('name') ?? '',
+      image,
+      width: num(e, 'width') ?? 100,
+      height: num(e, 'height') ?? 100,
+      ...(maps && Object.keys(maps).length > 0 && { maps }),
+      ...(libraryId && { libraryId }),
+    }
   }
   const surfaceOf = (e: Element, colorAttribute: string, textureAttribute: string): Surface | undefined => {
     const surface = { color: parseArgb(e.getAttribute(colorAttribute)), texture: textureOf(e, textureAttribute) }
@@ -131,6 +173,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
   let missingModels = 0
   const readPiece = (e: Element, level: string | null) => {
     const catalogPiece = byCatalogId.get(e.getAttribute('catalogId') ?? '')
+    const libraryId = catalogPiece?.libraryId ?? property(e, LIBRARY_ID_PROPERTY)
     const model = catalogPiece?.model ?? content(e.getAttribute('model'))
     if (!model) missingModels++
     const width = num(e, 'width') ?? 50
@@ -158,6 +201,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       color: parseArgb(e.getAttribute('color')),
       texture: textureOf(e, null),
       light: e.nodeName === 'light' ? lightInfo(e) : null,
+      ...(libraryId && { libraryId }),
       level,
     }
     home.furniture.push(piece)

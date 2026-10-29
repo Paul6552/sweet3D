@@ -15,7 +15,7 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { catalogApi, type TexturesCatalog } from '../api/catalog'
+import { useCatalogStore } from '../catalog/catalogStore'
 import { argbToCss, cssToArgb } from '../model/colors'
 import { CONTENT_PREFIX } from '../model/contents'
 import type { Home, Surface, TextureRef } from '../model/home'
@@ -149,21 +149,15 @@ function usedTextures(home: Home): TextureRef[] {
 
 function TexturePicker({ onPick, onClose }: { onPick: (texture: TextureRef) => void; onClose: () => void }) {
   const { t, i18n } = useTranslation()
-  const [catalog, setCatalog] = useState<TexturesCatalog | null>(null)
+  const catalog = useCatalogStore((s) => s.textures)
+  const load = useCatalogStore((s) => s.load)
   const [uploading, setUploading] = useState(false)
   const home = useEditorStore((s) => s.home)
   const used = useMemo(() => (home ? usedTextures(home) : []), [home])
 
   useEffect(() => {
-    let cancelled = false
-    void catalogApi
-      .textures(i18n.language)
-      .then((c) => !cancelled && setCatalog(c))
-      .catch(() => !cancelled && setCatalog({ language: '', categories: [] }))
-    return () => {
-      cancelled = true
-    }
-  }, [i18n.language])
+    void load(i18n.resolvedLanguage ?? 'de')
+  }, [i18n.resolvedLanguage, load])
 
   const upload = async (file: File) => {
     setUploading(true)
@@ -180,7 +174,15 @@ function TexturePicker({ onPick, onClose }: { onPick: (texture: TextureRef) => v
     ...(used.length > 0 ? [{ name: t('dialogs.surface.used'), textures: used }] : []),
     ...(catalog?.categories ?? []).map((category) => ({
       name: category.name,
-      textures: category.textures.map((x) => ({ catalogId: x.id, name: x.name, image: x.image, width: x.width, height: x.height })),
+      textures: category.textures.map((x) => ({
+        catalogId: x.id,
+        name: x.name,
+        image: x.image,
+        width: x.width,
+        height: x.height,
+        ...(x.maps && { maps: x.maps }),
+        ...(x.libraryId && { libraryId: x.libraryId }),
+      })),
     })),
   ]
 

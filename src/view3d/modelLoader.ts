@@ -165,6 +165,15 @@ async function resolverFor(ref: string): Promise<(url: string) => string> {
 }
 
 /**
+ * Größe eines Modells in seinen eigenen Einheiten; glTF ist immer in Metern, andere Formate meist
+ * in cm (siehe catalog/libraries.ts).
+ */
+export async function measureModel(ref: string): Promise<{ width: number; height: number; depth: number; meters: boolean }> {
+  const size = new Box3().setFromObject(await loadModel(ref)).getSize(new Vector3())
+  return { width: size.x, height: size.y, depth: size.z, meters: /\.(gltf|glb)$/i.test(ref) }
+}
+
+/**
  * Modell für ein Möbel wie in Sweet Home 3D (ModelManager): Modellrotation anwenden, dann so
  * skalieren, dass es genau width × height × depth einnimmt, unten mittig am Ursprung.
  */

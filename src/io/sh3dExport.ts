@@ -3,19 +3,29 @@ import { catalogApi, type CatalogPiece } from '../api/catalog'
 import { contentKey, isContentRef } from '../model/contents'
 import { contentBlobs } from '../storage/contents'
 import { formatArgb } from '../model/colors'
-import type { Home, HomePiece, Surface, TextureRef } from '../model/home'
+import type { Home, HomePiece, LibraryInfo, Surface, TextureMaps, TextureRef } from '../model/home'
 import { defaultWallHeight, levelElevation } from '../model/levels'
 import { fromObserverPitch, fromObserverYaw } from './sh3dCamera'
 
 /** Modell für Möbel ohne ladbares Modell, damit Sweet Home 3D die Datei öffnen kann. */
 const FALLBACK_MODEL = '/catalog/resources/texturableBox/texturableBox.obj'
 
+/** Eigene Angaben von Sweet3D als property-Elemente, die Sweet Home 3D liest und unverändert lässt. */
+export const LIBRARIES_PROPERTY = 'sweet3d.libraries'
+export const LIBRARY_ID_PROPERTY = 'sweet3d.libraryId'
+/** Zu Texturbildern (Eintrag im ZIP) die Einträge ihrer PBR-Karten und ihre Bibliothek. */
+export const TEXTURE_EXTRAS_PROPERTY = 'sweet3d.textureExtras'
+
+export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
+
 /**
  * Schreibt ein Projekt als .sh3d-Datei, wie sie Sweet Home 3D ab Version 5.3 liest: ZIP mit
  * Home.xml und den Modellen und Symbolen als nummerierte Einträge („0“, „1“, … bzw. „2/datei.obj“
  * bei mehrteiligen Modellen). Den serialisierten Java-Eintrag „Home“ braucht die Desktop-App nicht.
+ * Modelle aus Bibliotheken werden immer mitgespeichert; {@code libraries} nennt dem Empfänger
+ * zusätzlich die Bibliotheken, damit er sie bei Bedarf selbst importieren kann.
  */
-export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<Blob> {
+export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries: LibraryInfo[] = []): Promise<Blob> {
   const modelParts = await catalogApi.modelParts()
   const byId = new Map(catalog.map((p) => [p.id, p]))
   const entries: Record<string, Uint8Array> = {}
@@ -63,9 +73,18 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
   }
 
   /** Element „texture“ wie TextureImage in Home.xml; das Bild kommt als Eintrag ins ZIP. */
+  const textureExtras: TextureExtras = {}
   const texture = async (ref: TextureRef | null | undefined, attribute: string | null, indent: string): Promise<string[]> => {
     const image = ref ? await content(ref.image).catch(() => null) : null
     if (!ref || !image) return []
+    if (ref.maps || ref.libraryId) {
+      const maps: TextureMaps = {}
+      for (const [kind, map] of Object.entries(ref.maps ?? {}) as [keyof TextureMaps, string][]) {
+        const entry = await content(map).catch(() => null)
+        if (entry) maps[kind] = entry
+      }
+      textureExtras[image] = { ...(Object.keys(maps).length > 0 && { maps }), ...(ref.libraryId && { libraryId: ref.libraryId }) }
+    }
     return [`${indent}${element('texture', { attribute, name: ref.name, catalogId: ref.catalogId, width: ref.width, height: ref.height, image })}`]
   }
   const color = (surface: Surface | undefined) => (surface?.color != null && !surface.texture ? formatArgb(surface.color) : null)
@@ -128,6 +147,9 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
   const xml = [
     "<?xml version='1.0'?>",
     `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}'${home.selectedLevel ? ` selectedLevel='${escapeXml(home.selectedLevel)}'` : ''} wallHeight='${home.wallHeight}'>`,
+    // Eigenschaften stehen laut DTD vor allen anderen Kindern
+    ...(libraries.length > 0 ? [`  ${element('property', { name: LIBRARIES_PROPERTY, value: JSON.stringify(libraries) })}`] : []),
+    ...(Object.keys(textureExtras).length > 0 ? [`  ${element('property', { name: TEXTURE_EXTRAS_PROPERTY, value: JSON.stringify(textureExtras) })}`] : []),
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
     `  ${element('observerCamera', {
       attribute: 'observerCamera',
@@ -224,12 +246,13 @@ async function pieceXml(
   const light = !door && piece.light ? piece.light : null
   const name = door ? 'doorOrWindow' : light ? 'light' : 'pieceOfFurniture'
   if (light) Object.assign(attributes, { power: light.power })
-  // Reihenfolge wie in der DTD von Sweet Home 3D: Flügel bzw. Lichtquellen vor der Textur
+  // Reihenfolge wie in der DTD von Sweet Home 3D: Flügel bzw. Lichtquellen, Eigenschaften, Textur
   const children = [
     ...(door?.sashes ?? []).map((sash) => `    ${element('sash', { ...sash })}`),
     ...(light?.sources ?? []).map(
       (source) => `    ${element('lightSource', { x: source.x, y: source.y, z: source.z, color: formatArgb(source.color & 0xffffff), diameter: source.diameter || null })}`,
     ),
+    ...(piece.libraryId ? [`    ${element('property', { name: LIBRARY_ID_PROPERTY, value: piece.libraryId })}`] : []),
     ...texture,
   ]
   return children.length === 0 ? element(name, attributes) : [`${openTag(name, attributes)}>`, ...children, `  </${name}>`].join('\n')

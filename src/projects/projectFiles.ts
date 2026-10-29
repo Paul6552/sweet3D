@@ -1,17 +1,14 @@
-import { catalogApi, type CatalogPiece } from '../api/catalog'
+import { loadedCatalog } from '../catalog/catalogStore'
+import { libraryInfos } from '../catalog/libraries'
 import { exportSh3d } from '../io/sh3dExport'
 import { importSh3d, projectNameFromFile, Sh3dImportError } from '../io/sh3dImport'
 import type { Home } from '../model/home'
 import { createProject, isQuotaError, requestPersistentStorage, type ProjectSummary } from '../storage/projects'
 
-async function catalogPieces(language: string): Promise<CatalogPiece[]> {
-  const catalog = await catalogApi.furniture(language)
-  return catalog.categories.flatMap((c) => c.pieces)
-}
-
-/** Lädt ein Projekt als .sh3d-Datei herunter. */
+/** Lädt ein Projekt als .sh3d-Datei herunter, mit allen Modellen und den Angaben zu verwendeten Bibliotheken. */
 export async function downloadSh3d(home: Home, name: string, language: string) {
-  const blob = await exportSh3d(home, await catalogPieces(language))
+  const { pieces, libraries } = await loadedCatalog(language)
+  const blob = await exportSh3d(home, pieces, libraryInfos(home, libraries))
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -42,12 +39,8 @@ export async function createExampleProject(name: string, language: string): Prom
 
 async function importSh3dData(source: Promise<ArrayBuffer>, name: string, language: string): Promise<ImportOutcome> {
   try {
-    const [data, catalog, textures] = await Promise.all([
-      source,
-      catalogPieces(language),
-      catalogApi.textures(language).catch(() => null),
-    ])
-    const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), catalog, textures)
+    const [data, { pieces, textures }] = await Promise.all([source, loadedCatalog(language)])
+    const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), pieces, textures)
     requestPersistentStorage()
     const project = await createProject(name, home, contents)
     return { ok: true, project, missingModels }

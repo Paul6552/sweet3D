@@ -79,14 +79,14 @@ export async function deleteProject(id: string) {
   await removeUnusedContents()
 }
 
-/** Löscht importierte Dateien, auf die kein Projekt mehr verweist. */
-async function removeUnusedContents() {
+/** Löscht importierte Dateien, auf die weder ein Projekt noch eine importierte Bibliothek verweist. */
+export async function removeUnusedContents() {
   const db = await database()
-  // Verweise stecken in Modellen, Symbolen und Texturen: im ganzen Projekt danach suchen
+  // Verweise stecken in Modellen, Symbolen und Texturen: im ganzen Projekt bzw. der Bibliothek danach suchen
   const pattern = new RegExp(`${CONTENT_PREFIX}([^/"]+)`, 'g')
   const used = new Set<string>()
-  for (const home of await db.getAll('homes')) {
-    for (const match of JSON.stringify(home).matchAll(pattern)) used.add(match[1])
+  for (const owner of [...(await db.getAll('homes')), ...(await db.getAll('libraries'))]) {
+    for (const match of JSON.stringify(owner).matchAll(pattern)) used.add(match[1])
   }
   const tx = db.transaction('contents', 'readwrite')
   for (const key of await tx.store.getAllKeys()) {

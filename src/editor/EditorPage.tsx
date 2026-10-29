@@ -34,6 +34,7 @@ import type { PanelId } from './panelIds'
 import { PANELS } from './panels'
 import { useAutosave, type SaveState } from './useAutosave'
 import { useShortcuts } from './useShortcuts'
+import { MissingLibrariesNotice } from '../projects/MissingLibrariesNotice'
 
 const RESTORE_DELAY_MS = 1500
 
@@ -248,6 +249,7 @@ export function EditorPage() {
             {t('editor.openElsewhere')}
           </Alert>
         )}
+        <MissingLibrariesNotice projectId={projectId} />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <EditorLayout />
         </Box>

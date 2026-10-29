@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import type { StoredLibrary } from '../catalog/libraries'
 import type { Home } from '../model/home'
 
 /**
@@ -20,6 +21,8 @@ interface Sweet3dDb extends DBSchema {
   homes: { key: string; value: Home }
   /** Importierte Modelle und Symbole, Schlüssel wie in „content:<Schlüssel>“ (siehe model/contents.ts). */
   contents: { key: string; value: Blob }
+  /** Importierte Möbel- und Texturbibliotheken; ihre Dateien liegen in contents. */
+  libraries: { key: string; value: StoredLibrary }
 }
 
 export type Db = IDBPDatabase<Sweet3dDb>
@@ -27,11 +30,14 @@ export type Db = IDBPDatabase<Sweet3dDb>
 let db: Promise<Db> | null = null
 
 export function openDatabase(): Promise<Db> {
-  db ??= openDB<Sweet3dDb>('sweet3d', 1, {
-    upgrade(database) {
-      database.createObjectStore('projects', { keyPath: 'id' })
-      database.createObjectStore('homes')
-      database.createObjectStore('contents')
+  db ??= openDB<Sweet3dDb>('sweet3d', 2, {
+    upgrade(database, oldVersion) {
+      if (oldVersion < 1) {
+        database.createObjectStore('projects', { keyPath: 'id' })
+        database.createObjectStore('homes')
+        database.createObjectStore('contents')
+      }
+      if (oldVersion < 2) database.createObjectStore('libraries', { keyPath: 'id' })
     },
   })
   return db

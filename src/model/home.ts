@@ -242,6 +242,7 @@ export function normalizeHome(raw: unknown): Home {
     dimensionLines: home.dimensionLines ?? [],
     labels: home.labels ?? [],
     camera: home.camera ?? empty.camera,
+    ...(home.libraries && home.libraries.length > 0 ? { libraries: home.libraries } : {}),
   }
 }
 

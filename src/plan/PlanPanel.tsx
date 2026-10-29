@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import type { Point } from '../model/geometry'
 import { isDialogOpen, openItemDialog } from '../dialogs/dialogStore'
 import { useEditorStore } from '../store/editorStore'
+import { PanelToolbar } from '../editor/PanelFrame'
 import { LevelTabs } from './LevelTabs'
 import { PlanCanvas } from './PlanCanvas'
 import { usePlanStore, zoomAt, type PlanMode } from './planStore'
@@ -65,7 +66,7 @@ export function PlanPanel() {
   if (!hasHome) return null
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
+      <PanelToolbar>
         <ToggleButtonGroup size="small" exclusive value={mode} onChange={(_, value: PlanMode | null) => value && setMode(value)}>
           {MODES.map(({ mode: m, icon, key }) => (
             <ToggleButton key={m} value={m} aria-label={t(`plan.modes.${m}`)} sx={{ px: 1, py: 0.5 }}>
@@ -110,7 +111,7 @@ export function PlanPanel() {
             <GridGoldenratio fontSize="small" />
           </ToggleButton>
         </Tooltip>
-      </Box>
+      </PanelToolbar>
       <LevelTabs />
       <Box ref={areaRef} sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <PlanCanvas onStatus={onStatus} />

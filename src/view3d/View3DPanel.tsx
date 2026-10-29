@@ -19,6 +19,7 @@ import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { Ground, HORIZON, Sky } from './Environment'
 import { useEditorContext } from '../editor/EditorContext'
+import { PanelToolbar } from '../editor/PanelFrame'
 import { HomeScene } from './HomeScene'
 import { ThumbnailRecorder } from './ThumbnailRecorder'
 
@@ -92,7 +93,7 @@ export function View3DPanel() {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }} data-view3d>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
+      <PanelToolbar>
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -117,12 +118,13 @@ export function View3DPanel() {
             </IconButton>
           </Tooltip>
         )}
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ ml: 1 }}>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ ml: 1, flex: '1 1 0', minWidth: 0 }}>
           {t(mode === 'aerial' ? 'view3d.aerialHint' : 'view3d.observerHint')}
         </Typography>
-      </Box>
+      </PanelToolbar>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative', '& canvas': { outline: 'none' } }}>
-        <Canvas shadows dpr={[1, 2]} gl={{ antialias: true }} onPointerMissed={() => dispatch({ type: 'select', ids: [] })}>
+        {/* Logarithmische Tiefe: Böden knapp über dem Rasen flackern sonst schon aus mittlerer Entfernung */}
+        <Canvas shadows dpr={[1, 2]} gl={{ antialias: true, logarithmicDepthBuffer: true }} onPointerMissed={() => dispatch({ type: 'select', ids: [] })}>
           <color attach="background" args={[HORIZON]} />
           <fog attach="fog" args={[HORIZON, Math.max(bounds.radius * 3, 3000), Math.max(bounds.radius * 15, 40000)]} />
           <Sky />

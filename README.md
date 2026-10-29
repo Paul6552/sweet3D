@@ -11,6 +11,12 @@ as `.sh3d` files and exchanged with the desktop app.
 > **Contributions are welcome!** Everyone is invited to join in: open an [issue](https://github.com/Paul6552/sweet3D/issues) for bugs,
 > ideas or questions, or send a [pull request](https://github.com/Paul6552/sweet3D/pulls).
 
+## Support
+
+Sweet3D is free. If you would like to support its development:
+
+[![Support me with a coffee](https://img.shields.io/badge/Support%20me%20with%20a%20coffee-6F4E37?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/paul6552)
+
 | Path | Contents |
 |---|---|
 | `src/` | Vite + React 19 + TypeScript, MUI, TanStack Router, zustand, immer, Konva (2D), react-three-fiber (3D), fflate (ZIP), idb (IndexedDB) |

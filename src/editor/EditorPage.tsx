@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { downloadSh3d } from '../projects/projectFiles'
 import { ProjectsDialog } from '../projects/ProjectsDialog'
 import { getProject, setLastProject } from '../storage/projects'
+import { DialogHost } from '../dialogs/DialogHost'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { startLeader } from '../sync/leader'
 import { closedPanelWindows, focusPanelWindow, leaderIdFor, loadDetachedPanels, openPanelWindow } from '../sync/windows'
@@ -258,6 +259,7 @@ export function EditorPage() {
           onRenamed={(newName) => setRenamed({ id: projectId, name: newName })}
         />
       )}
+      <DialogHost />
     </EditorContext.Provider>
   )
 }

@@ -1,4 +1,4 @@
-import type { Home, HomePiece, Level, Room, Wall } from './home'
+import { homeItems, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Room, type Wall } from './home'
 import { sortLevels } from './levels'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
@@ -8,10 +8,12 @@ type Change<T extends { id: string }> = Partial<T> & { id: string }
  * per BroadcastChannel an das Editor-Hauptfenster schicken können.
  */
 export type HomeCommand =
-  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; furniture?: HomePiece[] }
+  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; furniture?: HomePiece[]; dimensionLines?: DimensionLine[]; labels?: Label[] }
   | { type: 'updateWalls'; changes: Change<Wall>[] }
   | { type: 'updateRooms'; changes: Change<Room>[] }
   | { type: 'updateFurniture'; changes: Change<HomePiece>[] }
+  | { type: 'updateDimensionLines'; changes: Change<DimensionLine>[] }
+  | { type: 'updateLabels'; changes: Change<Label>[] }
   | { type: 'moveItems'; ids: string[]; dx: number; dy: number }
   | { type: 'deleteItems'; ids: string[] }
   /**
@@ -41,11 +43,13 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       home.walls.push(...(command.walls ?? []).map((w) => ({ ...w, level })))
       home.rooms.push(...(command.rooms ?? []).map((r) => ({ ...r, level })))
       home.furniture.push(...(command.furniture ?? []).map((p) => ({ ...p, level })))
+      home.dimensionLines.push(...(command.dimensionLines ?? []).map((d) => ({ ...d, level })))
+      home.labels.push(...(command.labels ?? []).map((l) => ({ ...l, level })))
       break
     }
     case 'addLevels':
       if (command.assignExistingTo) {
-        for (const item of [...home.walls, ...home.rooms, ...home.furniture]) item.level ??= command.assignExistingTo
+        for (const item of homeItems(home)) item.level ??= command.assignExistingTo
       }
       home.levels = sortLevels([...home.levels, ...command.levels])
       home.selectedLevel = command.levels[command.levels.length - 1]?.id ?? home.selectedLevel
@@ -59,13 +63,13 @@ export function applyCommand(home: Home, command: HomeCommand): void {
     case 'deleteLevel': {
       const index = home.levels.findIndex((l) => l.id === command.id)
       if (index < 0) break
-      const onLevel = new Set([...home.walls, ...home.rooms, ...home.furniture].filter((i) => i.level === command.id).map((i) => i.id))
+      const onLevel = new Set(homeItems(home).filter((i) => i.level === command.id).map((i) => i.id))
       applyCommand(home, { type: 'deleteItems', ids: [...onLevel] })
       home.levels.splice(index, 1)
       if (home.selectedLevel === command.id) home.selectedLevel = home.levels[Math.max(0, index - 1)]?.id ?? null
       if (home.levels.length === 0) {
         // Letzte Ebene gelöscht: wieder ein Projekt ohne Ebenen
-        for (const item of [...home.walls, ...home.rooms, ...home.furniture]) item.level = null
+        for (const item of homeItems(home)) item.level = null
       }
       break
     }
@@ -78,6 +82,12 @@ export function applyCommand(home: Home, command: HomeCommand): void {
     case 'updateFurniture':
       applyChanges(home.furniture, command.changes)
       break
+    case 'updateDimensionLines':
+      applyChanges(home.dimensionLines, command.changes)
+      break
+    case 'updateLabels':
+      applyChanges(home.labels, command.changes)
+      break
     case 'moveItems':
       moveItems(home, new Set(command.ids), command.dx, command.dy)
       break
@@ -86,6 +96,8 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       home.walls = home.walls.filter((w) => !ids.has(w.id))
       home.rooms = home.rooms.filter((r) => !ids.has(r.id))
       home.furniture = home.furniture.filter((p) => !ids.has(p.id))
+      home.dimensionLines = home.dimensionLines.filter((d) => !ids.has(d.id))
+      home.labels = home.labels.filter((l) => !ids.has(l.id))
       // Verbindungen zu gelöschten Wänden lösen
       for (const wall of home.walls) {
         if (wall.wallAtStart && ids.has(wall.wallAtStart)) wall.wallAtStart = null
@@ -128,10 +140,18 @@ function moveItems(home: Home, ids: Set<string>, dx: number, dy: number): void {
   for (const room of home.rooms) {
     if (ids.has(room.id)) room.points = room.points.map(([x, y]) => [x + dx, y + dy])
   }
-  for (const piece of home.furniture) {
-    if (ids.has(piece.id)) {
-      piece.x += dx
-      piece.y += dy
+  for (const item of [...home.furniture, ...home.labels]) {
+    if (ids.has(item.id)) {
+      item.x += dx
+      item.y += dy
+    }
+  }
+  for (const line of home.dimensionLines) {
+    if (ids.has(line.id)) {
+      line.xStart += dx
+      line.yStart += dy
+      line.xEnd += dx
+      line.yEnd += dy
     }
   }
 }

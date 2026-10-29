@@ -2,7 +2,8 @@ import { strToU8, zip } from 'fflate'
 import { catalogApi, type CatalogPiece } from '../api/catalog'
 import { contentKey, isContentRef } from '../model/contents'
 import { contentBlobs } from '../storage/contents'
-import type { Home, HomePiece } from '../model/home'
+import { formatArgb } from '../model/colors'
+import type { Home, HomePiece, Surface, TextureRef } from '../model/home'
 import { defaultWallHeight, levelElevation } from '../model/levels'
 import { fromObserverPitch, fromObserverYaw } from './sh3dCamera'
 
@@ -61,7 +62,68 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
     return name
   }
 
-  const pieces = await Promise.all(home.furniture.map((piece) => pieceXml(piece, byId.get(piece.catalogId ?? ''), content)))
+  /** Element „texture“ wie TextureImage in Home.xml; das Bild kommt als Eintrag ins ZIP. */
+  const texture = async (ref: TextureRef | null | undefined, attribute: string | null, indent: string): Promise<string[]> => {
+    const image = ref ? await content(ref.image).catch(() => null) : null
+    if (!ref || !image) return []
+    return [`${indent}${element('texture', { attribute, name: ref.name, catalogId: ref.catalogId, width: ref.width, height: ref.height, image })}`]
+  }
+  const color = (surface: Surface | undefined) => (surface?.color != null && !surface.texture ? formatArgb(surface.color) : null)
+  /** Element mit Kindern bzw. leer, wenn es keine gibt. */
+  const withChildren = (start: string, name: string, children: string[]) =>
+    children.length === 0 ? `  ${start}/>` : [`  ${start}>`, ...children, `  </${name}>`].join('\n')
+
+  const pieces = await Promise.all(
+    home.furniture.map(async (piece) =>
+      pieceXml(piece, byId.get(piece.catalogId ?? ''), content, await texture(piece.texture, null, '    ')),
+    ),
+  )
+  const walls = await Promise.all(
+    home.walls.map(async (wall) =>
+      withChildren(
+        openTag('wall', {
+          id: wall.id,
+          level: wall.level,
+          wallAtStart: wall.wallAtStart,
+          wallAtEnd: wall.wallAtEnd,
+          xStart: wall.xStart,
+          yStart: wall.yStart,
+          xEnd: wall.xEnd,
+          yEnd: wall.yEnd,
+          // Ohne eigene Höhe nimmt Sweet Home 3D die Projekthöhe, nicht die der Ebene
+          height: wall.height ?? defaultWallHeight(home, wall.level),
+          thickness: wall.thickness,
+          pattern: 'hatchUp',
+          leftSideColor: color(wall.leftSide),
+          rightSideColor: color(wall.rightSide),
+        }),
+        'wall',
+        [...(await texture(wall.leftSide?.texture, 'leftSideTexture', '    ')), ...(await texture(wall.rightSide?.texture, 'rightSideTexture', '    '))],
+      ),
+    ),
+  )
+  const rooms = await Promise.all(
+    home.rooms.map(async (room) =>
+      withChildren(
+        openTag('room', {
+          id: room.id,
+          level: room.level,
+          name: room.name,
+          areaVisible: true,
+          floorVisible: room.floorVisible ? null : false,
+          ceilingVisible: room.ceilingVisible ? null : false,
+          floorColor: color(room.floor),
+          ceilingColor: color(room.ceiling),
+        }),
+        'room',
+        [
+          ...room.points.map(([x, y]) => `    ${element('point', { x, y })}`),
+          ...(await texture(room.floor?.texture, 'floorTexture', '    ')),
+          ...(await texture(room.ceiling?.texture, 'ceilingTexture', '    ')),
+        ],
+      ),
+    ),
+  )
   const { observer } = home.camera
   const xml = [
     "<?xml version='1.0'?>",
@@ -93,35 +155,20 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
         })}`,
     ),
     ...pieces.map((p) => `  ${p}`),
-    ...home.walls.map(
-      (wall) =>
-        `  ${element('wall', {
-          id: wall.id,
-          level: wall.level,
-          wallAtStart: wall.wallAtStart,
-          wallAtEnd: wall.wallAtEnd,
-          xStart: wall.xStart,
-          yStart: wall.yStart,
-          xEnd: wall.xEnd,
-          yEnd: wall.yEnd,
-          // Ohne eigene Höhe nimmt Sweet Home 3D die Projekthöhe, nicht die der Ebene
-          height: wall.height ?? defaultWallHeight(home, wall.level),
-          thickness: wall.thickness,
-          pattern: 'hatchUp',
-        })}`,
+    ...walls,
+    ...rooms,
+    ...home.dimensionLines.map(
+      (line) =>
+        `  ${element('dimensionLine', { id: line.id, level: line.level, xStart: line.xStart, yStart: line.yStart, xEnd: line.xEnd, yEnd: line.yEnd, offset: line.offset })}`,
     ),
-    ...home.rooms.map((room) => {
-      const attributes = element('room', {
-        id: room.id,
-        level: room.level,
-        name: room.name,
-        areaVisible: true,
-        floorVisible: room.floorVisible ? null : false,
-        ceilingVisible: room.ceilingVisible ? null : false,
-      }, true)
-      const points = room.points.map(([x, y]) => `    ${element('point', { x, y })}`)
-      return [`  ${attributes}`, ...points, '  </room>'].join('\n')
-    }),
+    ...home.labels.map((label) =>
+      [
+        `  ${openTag('label', { id: label.id, level: label.level, x: label.x, y: label.y, angle: label.angle || null, color: label.color === null ? null : formatArgb(label.color) })}>`,
+        `    ${element('textStyle', { fontSize: label.fontSize })}`,
+        `    <text>${escapeXml(label.text)}</text>`,
+        '  </label>',
+      ].join('\n'),
+    ),
     '</home>',
     '',
   ].join('\n')
@@ -133,7 +180,12 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[]): Promise<B
   return new Blob([zipped as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' })
 }
 
-async function pieceXml(piece: HomePiece, catalogPiece: CatalogPiece | undefined, content: (ref: string | null) => Promise<string | null>): Promise<string> {
+async function pieceXml(
+  piece: HomePiece,
+  catalogPiece: CatalogPiece | undefined,
+  content: (ref: string | null) => Promise<string | null>,
+  texture: string[],
+): Promise<string> {
   const [model, icon, planIcon] = await Promise.all([
     content(piece.model).then((m) => m ?? content(FALLBACK_MODEL)),
     content(piece.icon),
@@ -160,7 +212,7 @@ async function pieceXml(piece: HomePiece, catalogPiece: CatalogPiece | undefined
     modelRotation: piece.modelRotation ? piece.modelRotation.flat().join(' ') : null,
     movable: catalogPiece ? catalogPiece.movable : null,
     visible: piece.visible ? null : false,
-    color: piece.color === null ? null : (piece.color >>> 0).toString(16).toUpperCase().padStart(8, '0'),
+    color: piece.color === null || piece.texture ? null : formatArgb(piece.color),
     ...(door && {
       wallThickness: door.wallThickness,
       wallDistance: door.wallDistance,
@@ -169,20 +221,24 @@ async function pieceXml(piece: HomePiece, catalogPiece: CatalogPiece | undefined
       widthDepthDeformable: door.widthDepthDeformable ? null : false,
     }),
   }
-  if (!door) return element('pieceOfFurniture', attributes)
-  const sashes = door.sashes.map((sash) => `    ${element('sash', { ...sash })}`)
-  return [element('doorOrWindow', attributes, sashes.length > 0), ...(sashes.length ? [...sashes, '  </doorOrWindow>'] : [])].join('\n')
+  const name = door ? 'doorOrWindow' : 'pieceOfFurniture'
+  const children = [...texture, ...(door?.sashes ?? []).map((sash) => `    ${element('sash', { ...sash })}`)]
+  return children.length === 0 ? element(name, attributes) : [`${openTag(name, attributes)}>`, ...children, `  </${name}>`].join('\n')
 }
 
 type AttributeValue = string | number | boolean | null | undefined
 
-/** XML-Element mit Attributen; {@code null}/{@code undefined} werden weggelassen. */
-function element(name: string, attributes: Record<string, AttributeValue>, open = false): string {
+/** Anfang eines XML-Elements ohne „>“; {@code null}/{@code undefined} werden weggelassen. */
+function openTag(name: string, attributes: Record<string, AttributeValue>): string {
   const text = Object.entries(attributes)
     .filter((entry): entry is [string, string | number | boolean] => entry[1] !== null && entry[1] !== undefined)
     .map(([key, value]) => ` ${key}='${escapeXml(String(value))}'`)
     .join('')
-  return `<${name}${text}${open ? '>' : '/>'}`
+  return `<${name}${text}`
+}
+
+function element(name: string, attributes: Record<string, AttributeValue>): string {
+  return `${openTag(name, attributes)}/>`
 }
 
 function escapeXml(value: string): string {

@@ -1,8 +1,9 @@
 import { useTheme } from '@mui/material/styles'
 import { memo, useCallback, useMemo } from 'react'
 import { Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
-import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
-import { polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
+import { argbToCss } from '../model/colors'
+import type { DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Wall } from '../model/home'
+import { dimensionLength, dimensionOffsetPoints, labelCorners, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
 import { useResolvedRef } from '../storage/contents'
@@ -14,6 +15,8 @@ export interface PlanPreview {
   /** Punkte des Raums, der gerade gezeichnet wird (inkl. Mauszeiger). */
   roomPoints?: Point[]
   rubberBand?: [Point, Point]
+  /** Maßlinie, die gerade gezeichnet wird. */
+  dimensionLine?: DimensionLine
   /** Hinweis am Mauszeiger, z. B. Länge und Winkel der Wand. */
   label?: { point: Point; text: string }
 }
@@ -132,6 +135,84 @@ const PieceShape = memo(function PieceShape({ piece, scale, stroke, selected, se
   )
 })
 
+const lengthFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, useGrouping: false })
+
+/**
+ * Maßlinie wie in Sweet Home 3D: Hilfslinien von den gemessenen Punkten zur verschobenen
+ * Linie, schräge Endstriche und die Länge in cm über der Linie.
+ */
+const DimensionShape = memo(function DimensionShape({ line, scale, color, dashed }: { line: DimensionLine; scale: number; color: string; dashed?: boolean }) {
+  const [a, b] = dimensionOffsetPoints(line)
+  const angle = Math.atan2(b[1] - a[1], b[0] - a[0])
+  // Text immer lesbar, also nicht auf dem Kopf
+  const upright = Math.cos(angle) < -1e-6 || (Math.abs(Math.cos(angle)) <= 1e-6 && Math.sin(angle) > 0)
+  const textAngle = upright ? angle + Math.PI : angle
+  const fontSize = 11 / scale
+  const tick = 5 / scale
+  const overshoot = (Math.sign(line.offset) || 1) * (4 / scale)
+  const nx = -Math.sin(angle) * overshoot
+  const ny = Math.cos(angle) * overshoot
+  return (
+    <Group listening={false}>
+      <Shape
+        sceneFunc={(ctx, shape) => {
+          ctx.beginPath()
+          ctx.moveTo(line.xStart, line.yStart)
+          ctx.lineTo(a[0] + nx, a[1] + ny)
+          ctx.moveTo(line.xEnd, line.yEnd)
+          ctx.lineTo(b[0] + nx, b[1] + ny)
+          ctx.moveTo(a[0], a[1])
+          ctx.lineTo(b[0], b[1])
+          for (const [x, y] of [a, b]) {
+            ctx.moveTo(x - Math.cos(angle + Math.PI / 4) * tick, y - Math.sin(angle + Math.PI / 4) * tick)
+            ctx.lineTo(x + Math.cos(angle + Math.PI / 4) * tick, y + Math.sin(angle + Math.PI / 4) * tick)
+          }
+          ctx.strokeShape(shape)
+        }}
+        stroke={color}
+        strokeWidth={1 / scale}
+        dash={dashed ? [4 / scale, 3 / scale] : undefined}
+      />
+      <Text
+        x={(a[0] + b[0]) / 2}
+        y={(a[1] + b[1]) / 2}
+        rotation={(textAngle * 180) / Math.PI}
+        text={lengthFormat.format(dimensionLength(line))}
+        fontSize={fontSize}
+        fill={color}
+        align="center"
+        width={400 / scale}
+        offsetX={200 / scale}
+        offsetY={fontSize + 2 / scale}
+      />
+    </Group>
+  )
+})
+
+/** Text im Plan; die Schriftgröße ist in cm und wächst daher mit dem Zoom. */
+const LabelShape = memo(function LabelShape({ label, scale, ink, selected, selectedColor }: { label: HomeLabel; scale: number; ink: string; selected: boolean; selectedColor: string }) {
+  const lines = label.text.split('\n').length
+  const width = 100000
+  return (
+    <Group listening={false}>
+      <Text
+        x={label.x}
+        y={label.y}
+        rotation={(label.angle * 180) / Math.PI}
+        text={label.text}
+        fontSize={label.fontSize}
+        lineHeight={1.2}
+        fill={label.color === null ? ink : argbToCss(label.color)}
+        align="center"
+        width={width}
+        offsetX={width / 2}
+        offsetY={lines * label.fontSize * 1.2 - label.fontSize * 0.2}
+      />
+      {selected && <Line points={flat(labelCorners(label))} closed stroke={selectedColor} strokeWidth={2 / scale} dash={[4 / scale, 3 / scale]} />}
+    </Group>
+  )
+})
+
 /** Virtueller Besucher: Kopf, Blickfeld und Drehgriff. */
 function Observer({ observer, scale, color, paper }: { observer: ObserverCamera; scale: number; color: string; paper: string }) {
   const length = 150
@@ -218,7 +299,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
               <Line
                 points={flat(room.points)}
                 closed
-                fill={dark ? 'rgba(144,202,249,0.10)' : 'rgba(25,118,210,0.07)'}
+                fill={room.floor?.color != null ? `${argbToCss(room.floor.color)}66` : dark ? 'rgba(144,202,249,0.10)' : 'rgba(25,118,210,0.07)'}
                 stroke={isSelected ? selectedColor : theme.palette.text.secondary}
                 strokeWidth={(isSelected ? 3 : 1) / scale}
               />
@@ -251,9 +332,17 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
               selectedColor={selectedColor}
             />
           ))}
+
+        {home.dimensionLines.map((line) => (
+          <DimensionShape key={line.id} line={line} scale={scale} color={selected.has(line.id) ? selectedColor : ink} />
+        ))}
+
+        {home.labels.map((label) => (
+          <LabelShape key={label.id} label={label} scale={scale} ink={ink} selected={selected.has(label.id)} selectedColor={selectedColor} />
+        ))}
       </>
     ),
-    [below, home.rooms, home.walls, home.furniture, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape],
+    [below, home.rooms, home.walls, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink],
   )
 
   return (
@@ -267,6 +356,8 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
       />
 
       {shapes}
+
+      {preview.dimensionLine && <DimensionShape line={preview.dimensionLine} scale={scale} color={selectedColor} dashed />}
 
       {preview.wall && wallShape(preview.wall, wallPolygon(preview.wall, wallsById), true, true)}
 

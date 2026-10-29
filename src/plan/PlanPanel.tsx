@@ -1,9 +1,12 @@
+import EditOutlined from '@mui/icons-material/EditOutlined'
 import FitScreen from '@mui/icons-material/FitScreen'
 import FormatShapes from '@mui/icons-material/FormatShapes'
 import GridGoldenratio from '@mui/icons-material/GridGoldenratio'
 import HighlightAlt from '@mui/icons-material/HighlightAlt'
 import PanToolOutlined from '@mui/icons-material/PanToolOutlined'
 import Polyline from '@mui/icons-material/Polyline'
+import Straighten from '@mui/icons-material/Straighten'
+import TextFields from '@mui/icons-material/TextFields'
 import ZoomIn from '@mui/icons-material/ZoomIn'
 import ZoomOut from '@mui/icons-material/ZoomOut'
 import Box from '@mui/material/Box'
@@ -16,6 +19,7 @@ import Typography from '@mui/material/Typography'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Point } from '../model/geometry'
+import { isDialogOpen, openItemDialog } from '../dialogs/dialogStore'
 import { useEditorStore } from '../store/editorStore'
 import { LevelTabs } from './LevelTabs'
 import { PlanCanvas } from './PlanCanvas'
@@ -26,12 +30,15 @@ const MODES: { mode: PlanMode; icon: React.ReactNode; key: string }[] = [
   { mode: 'pan', icon: <PanToolOutlined fontSize="small" />, key: 'H' },
   { mode: 'wall', icon: <Polyline fontSize="small" />, key: 'W' },
   { mode: 'room', icon: <FormatShapes fontSize="small" />, key: 'R' },
+  { mode: 'dimension', icon: <Straighten fontSize="small" />, key: 'M' },
+  { mode: 'label', icon: <TextFields fontSize="small" />, key: 'T' },
 ]
 
 /** 2D-Plan mit Werkzeugleiste und Statuszeile. */
 export function PlanPanel() {
   const { t } = useTranslation()
   const hasHome = useEditorStore((s) => s.home !== null)
+  const selection = useEditorStore((s) => s.selection)
   const { mode, setMode, magnetism, setMagnetism, view, setView, requestFit } = usePlanStore()
   const [status, setStatus] = useState<{ cursor: Point | null; hint: string }>({ cursor: null, hint: '' })
   const areaRef = useRef<HTMLDivElement>(null)
@@ -41,7 +48,7 @@ export function PlanPanel() {
     const onKeyDown = (event: KeyboardEvent) => {
       // Nicht reagieren, wenn die 3D-Ansicht die Tasten bekommt (W/A/S/D für den Besucher)
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [data-view3d]') || event.ctrlKey || event.metaKey || event.altKey) return
+      if (target?.closest('input, textarea, [data-view3d]') || event.ctrlKey || event.metaKey || event.altKey || isDialogOpen()) return
       const match = MODES.find((m) => m.key.toLowerCase() === event.key.toLowerCase())
       if (match) setMode(match.mode)
     }
@@ -68,6 +75,13 @@ export function PlanPanel() {
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
+        <Tooltip title={t('plan.modify')}>
+          <span>
+            <IconButton size="small" disabled={selection.length === 0} onClick={() => openItemDialog(selection)} aria-label={t('plan.modify')}>
+              <EditOutlined fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
         <Tooltip title={t('plan.zoomIn')}>
           <IconButton size="small" onClick={() => zoom(1.25)} aria-label={t('plan.zoomIn')}>

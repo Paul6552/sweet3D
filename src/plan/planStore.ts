@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type PlanMode = 'select' | 'pan' | 'wall' | 'room'
+export type PlanMode = 'select' | 'pan' | 'wall' | 'room' | 'dimension' | 'label'
 
 export interface PlanView {
   /** Pixel pro cm. */

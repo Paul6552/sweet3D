@@ -1,4 +1,4 @@
-import { contentId, dataUrlToBytes, guessMime, isContentRef } from '../model/contents'
+import { CONTENT_PREFIX, dataUrlToBytes, guessMime } from '../model/contents'
 import { createEmptyHome, normalizeHome, type Home } from '../model/home'
 import { openDatabase, type ProjectSummary } from './db'
 
@@ -82,18 +82,32 @@ export async function deleteProject(id: string) {
 /** Löscht importierte Dateien, auf die kein Projekt mehr verweist. */
 async function removeUnusedContents() {
   const db = await database()
+  // Verweise stecken in Modellen, Symbolen und Texturen: im ganzen Projekt danach suchen
+  const pattern = new RegExp(`${CONTENT_PREFIX}([^/"]+)`, 'g')
   const used = new Set<string>()
   for (const home of await db.getAll('homes')) {
-    for (const piece of home.furniture) {
-      for (const ref of [piece.model, piece.icon, piece.planIcon]) {
-        if (ref && isContentRef(ref)) used.add(contentId(ref))
-      }
-    }
+    for (const match of JSON.stringify(home).matchAll(pattern)) used.add(match[1])
   }
   const tx = db.transaction('contents', 'readwrite')
   for (const key of await tx.store.getAllKeys()) {
     if (!used.has(key.split('/')[0])) await tx.store.delete(key)
   }
+  await tx.done
+}
+
+/** Legt Dateien ab, z. B. ein eigenes Texturbild; Schlüssel wie in „content:<Schlüssel>“. */
+export async function saveContents(contents: Record<string, Blob>) {
+  const db = await database()
+  const tx = db.transaction('contents', 'readwrite')
+  await Promise.all([...Object.entries(contents).map(([key, blob]) => tx.store.put(blob, key)), tx.done])
+}
+
+/** Speichert das Vorschaubild, ohne das Änderungsdatum anzufassen. */
+export async function saveThumbnail(id: string, thumbnail: Blob) {
+  const db = await database()
+  const tx = db.transaction('projects', 'readwrite')
+  const summary = await tx.store.get(id)
+  if (summary) await tx.store.put({ ...summary, thumbnail })
   await tx.done
 }
 

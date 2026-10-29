@@ -1,5 +1,5 @@
 import type { HomeCommand } from '../model/commands'
-import { newId, type Home, type HomePiece, type Room, type Wall } from '../model/home'
+import { newId, type DimensionLine, type Home, type HomePiece, type Label, type Room, type Wall } from '../model/home'
 
 const CLIPBOARD_KEY = 'sweet3d.clipboard'
 const PASTE_OFFSET = 20
@@ -8,6 +8,8 @@ interface ClipboardContent {
   walls: Wall[]
   rooms: Room[]
   furniture: HomePiece[]
+  dimensionLines?: DimensionLine[]
+  labels?: Label[]
 }
 
 /** Kopiert die ausgewählten Objekte; über localStorage auch zwischen Fenstern und Projekten. */
@@ -17,6 +19,8 @@ export function copySelection(home: Home, selection: string[]): void {
     walls: home.walls.filter((w) => ids.has(w.id)),
     rooms: home.rooms.filter((r) => ids.has(r.id)),
     furniture: home.furniture.filter((p) => ids.has(p.id)),
+    dimensionLines: home.dimensionLines.filter((d) => ids.has(d.id)),
+    labels: home.labels.filter((l) => ids.has(l.id)),
   }
   try {
     localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(content))
@@ -36,7 +40,16 @@ export function pasteCommand(): { command: HomeCommand; ids: string[] } | null {
   } catch {
     return null
   }
-  if (!content || content.walls.length + content.rooms.length + content.furniture.length === 0) return null
+  const dimensionLines = (content?.dimensionLines ?? []).map((d) => ({
+    ...d,
+    id: newId('dimension'),
+    xStart: d.xStart + PASTE_OFFSET,
+    yStart: d.yStart + PASTE_OFFSET,
+    xEnd: d.xEnd + PASTE_OFFSET,
+    yEnd: d.yEnd + PASTE_OFFSET,
+  }))
+  const labels = (content?.labels ?? []).map((l) => ({ ...l, id: newId('label'), x: l.x + PASTE_OFFSET, y: l.y + PASTE_OFFSET }))
+  if (!content || content.walls.length + content.rooms.length + content.furniture.length + dimensionLines.length + labels.length === 0) return null
   const wallIds = new Map(content.walls.map((w) => [w.id, newId('wall')]))
   const walls = content.walls.map((w) => ({
     ...w,
@@ -55,7 +68,7 @@ export function pasteCommand(): { command: HomeCommand; ids: string[] } | null {
   }))
   const furniture = content.furniture.map((p) => ({ ...p, id: newId('piece'), x: p.x + PASTE_OFFSET, y: p.y + PASTE_OFFSET }))
   return {
-    command: { type: 'addItems', walls, rooms, furniture },
-    ids: [...walls, ...rooms, ...furniture].map((i) => i.id),
+    command: { type: 'addItems', walls, rooms, furniture, dimensionLines, labels },
+    ids: [...walls, ...rooms, ...furniture, ...dimensionLines, ...labels].map((i) => i.id),
   }
 }

@@ -29,8 +29,12 @@ export type ImportOutcome =
 /** Importiert eine .sh3d-Datei als neues Projekt im Browser. */
 export async function importSh3dFile(file: File, language: string): Promise<ImportOutcome> {
   try {
-    const [data, catalog] = await Promise.all([file.arrayBuffer(), catalogPieces(language)])
-    const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), catalog)
+    const [data, catalog, textures] = await Promise.all([
+      file.arrayBuffer(),
+      catalogPieces(language),
+      catalogApi.textures(language).catch(() => null),
+    ])
+    const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), catalog, textures)
     requestPersistentStorage()
     const project = await createProject(projectNameFromFile(file.name), home, contents)
     return { ok: true, project, missingModels }

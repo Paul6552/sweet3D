@@ -44,7 +44,14 @@ docker compose up -d --build   # http://localhost:8180
 - Herunterladen als `.sh3d` über das Download-Symbol in der Werkzeugleiste oder im Projektdialog.
   Die Datei enthält `Home.xml` und die Modelle und öffnet sich in Sweet Home 3D ab Version 5.3.
 - Import: Dateien aus Sweet Home 3D ab 5.3. Möbel aus dem Standardkatalog nutzen dessen Modelle, andere Modelle
-  werden ins Projekt übernommen (OBJ). Alle Ebenen werden übernommen und wieder exportiert.
+  werden ins Projekt übernommen (OBJ). Ebenen, Maßlinien, Texte, Farben und Texturen werden übernommen und wieder
+  exportiert. Regale (`shelfUnit`) werden als normale Möbel übernommen, ohne ihre Fächer.
+- Maßlinien (M): Anfang und Ende anklicken, dann den Abstand mit der Maus festlegen; sie rasten an Ecken ein.
+  Texte (T): an die gewünschte Stelle klicken und den Text eingeben.
+- Eigenschaften: Doppelklick im Plan oder in der Möbelliste bzw. der Stift in der Werkzeugleiste ändert die
+  Auswahl, auch mehrere Objekte zugleich. Wandseiten, Böden, Decken und Möbel bekommen eine Farbe oder eine
+  Textur aus dem Katalog, aus dem Projekt oder ein eigenes Bild.
+- Die Projektliste zeigt ein Vorschaubild, das die 3D-Ansicht nach jeder Änderung aktualisiert.
 - Ebenen: Reiter über dem Plan wählen die Ebene, „+“ legt eine neue über der obersten an, Doppelklick auf einen
   Reiter ändert Name, Höhe, Raumhöhe, Deckenstärke und Sichtbarkeit oder löscht die Ebene. Der Plan zeigt die
   Ebene darunter blass, die 3D-Ansicht wie Sweet Home 3D die gewählte Ebene und alle darunter.
@@ -71,7 +78,7 @@ lösen, z. B. 2D-Plan auf Bildschirm 1 und 3D-Ansicht auf Bildschirm 2.
 - [x] 3D-Ansicht (react-three-fiber: Wände mit Tür-/Fensteröffnungen, Böden, Möbelmodelle, Luftansicht und virtueller Besucher)
 - [x] `.sh3d`-Import und -Download
 - [x] Ebenen
-- [ ] Maßlinien und Texte, Eigenschaftsdialoge (Farben, Texturen), Vorschaubilder
+- [x] Maßlinien und Texte, Eigenschaftsdialoge (Farben, Texturen), Vorschaubilder
 
 ## Lizenz
 

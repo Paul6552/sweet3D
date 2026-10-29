@@ -1,9 +1,10 @@
 import type { ThreeEvent } from '@react-three/fiber'
 import { memo, useMemo } from 'react'
-import { DoubleSide, Shape, ShapeGeometry } from 'three'
-import type { Home } from '../model/home'
+import { Shape, ShapeGeometry } from 'three'
+import type { Home, Wall } from '../model/home'
 import { defaultWallHeight, visibleLevels } from '../model/levels'
 import { dispatch } from '../store/editorStore'
+import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
 import { wallSlices } from './wallGeometry'
 
@@ -22,6 +23,15 @@ function selectOnClick(event: ThreeEvent<MouseEvent>, id: string, selection: str
   event.stopPropagation()
   const ids = event.shiftKey ? (selection.includes(id) ? selection.filter((s) => s !== id) : [...selection, id]) : [id]
   dispatch({ type: 'select', ids })
+}
+
+const WALL = '#f1eee8'
+const FLOOR = '#cdb79a'
+const CEILING = '#fafafa'
+
+/** Materialien in der Reihenfolge der Gruppen aus wallSlices: Kanten, linke Seite, rechte Seite. */
+function wallMaterials(wall: Wall, highlight: string | null) {
+  return [surfaceMaterial(null, WALL, highlight), surfaceMaterial(wall.leftSide, WALL, highlight), surfaceMaterial(wall.rightSide, WALL, highlight)]
 }
 
 function roomGeometry(points: [number, number][]): ShapeGeometry {
@@ -90,24 +100,26 @@ function LevelScene({ home, levelId, selection, selectionColor, showCeilings }: 
             position-y={slice.top}
             castShadow
             receiveShadow
+            material={wallMaterials(wall, selection.includes(wall.id) ? selectionColor : null)}
             onClick={(e) => selectOnClick(e, wall.id, selection)}
-          >
-            <meshStandardMaterial color={selection.includes(wall.id) ? selectionColor : '#f1eee8'} side={DoubleSide} />
-          </mesh>
+          />
         )),
       )}
 
       {rooms.map(({ room, geometry }) => (
         <group key={room.id}>
           {room.floorVisible && (
-            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={0.5} receiveShadow onClick={(e) => selectOnClick(e, room.id, selection)}>
-              <meshStandardMaterial color={selection.includes(room.id) ? selectionColor : '#cdb79a'} side={DoubleSide} />
-            </mesh>
+            <mesh
+              geometry={geometry}
+              rotation-x={Math.PI / 2}
+              position-y={0.5}
+              receiveShadow
+              material={surfaceMaterial(room.floor, FLOOR, selection.includes(room.id) ? selectionColor : null)}
+              onClick={(e) => selectOnClick(e, room.id, selection)}
+            />
           )}
           {room.ceilingVisible && showCeilings && (
-            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5}>
-              <meshStandardMaterial color="#fafafa" side={DoubleSide} />
-            </mesh>
+            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} material={surfaceMaterial(room.ceiling, CEILING)} />
           )}
         </group>
       ))}

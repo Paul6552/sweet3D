@@ -10,6 +10,8 @@ export interface ProjectSummary {
   name: string
   createdAt: string
   updatedAt: string
+  /** Vorschaubild aus der 3D-Ansicht. */
+  thumbnail?: Blob
 }
 
 interface Sweet3dDb extends DBSchema {

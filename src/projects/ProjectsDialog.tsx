@@ -21,7 +21,7 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNotify } from '../editor/useNotify'
 import {
@@ -198,7 +198,8 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
                   </Stack>
                 }
               >
-                <ListItemButton selected={project.id === currentId} onClick={() => openProject(project.id)} sx={{ pr: 20 }}>
+                <ListItemButton selected={project.id === currentId} onClick={() => openProject(project.id)} sx={{ pr: 20, gap: 1.5 }}>
+                  <Thumbnail blob={project.thumbnail} />
                   <ListItemText
                     primary={
                       <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -280,5 +281,25 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
         </DialogActions>
       </Dialog>
     </>
+  )
+}
+
+/** Vorschaubild aus der 3D-Ansicht (siehe ThumbnailRecorder), sonst eine leere Fläche. */
+function Thumbnail({ blob }: { blob: Blob | undefined }) {
+  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : null), [blob])
+  useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url])
+  return (
+    <Box
+      sx={{
+        width: 80,
+        height: 50,
+        flexShrink: 0,
+        borderRadius: 1,
+        bgcolor: 'action.hover',
+        backgroundImage: url ? `url("${url}")` : undefined,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }}
+    />
   )
 }

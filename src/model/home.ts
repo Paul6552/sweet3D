@@ -3,6 +3,27 @@
  * (Längen in cm, Winkel in Radiant), damit der Import/Export von .sh3d-Dateien 1:1 möglich ist.
  */
 
+/**
+ * Textur einer Fläche wie TextureImage in Sweet Home 3D: Bild (Katalog-URL oder Verweis
+ * „content:…“) und Größe einer Kachel in cm.
+ */
+export interface TextureRef {
+  catalogId: string | null
+  name: string
+  image: string
+  width: number
+  height: number
+}
+
+/**
+ * Aussehen einer Fläche: Farbe (ARGB wie in Sweet Home 3D) oder Textur; beides {@code null}
+ * bedeutet Standard.
+ */
+export interface Surface {
+  color: number | null
+  texture: TextureRef | null
+}
+
 export interface Wall {
   id: string
   xStart: number
@@ -18,6 +39,9 @@ export interface Wall {
   height: number | null
   /** Id der Ebene; {@code null}, solange das Projekt keine Ebenen hat. */
   level: string | null
+  /** Seite links bzw. rechts in Zeichenrichtung (vom Start zum Ende). */
+  leftSide?: Surface
+  rightSide?: Surface
 }
 
 export interface Room {
@@ -27,7 +51,35 @@ export interface Room {
   floorVisible: boolean
   ceilingVisible: boolean
   level: string | null
+  floor?: Surface
+  ceiling?: Surface
 }
+
+/** Maßlinie: gemessene Strecke und Abstand der Linie davon (positiv = links in Messrichtung). */
+export interface DimensionLine {
+  id: string
+  xStart: number
+  yStart: number
+  xEnd: number
+  yEnd: number
+  offset: number
+  level: string | null
+}
+
+/** Freier Text im Plan; (x, y) ist die Mitte der Grundlinie. */
+export interface Label {
+  id: string
+  text: string
+  x: number
+  y: number
+  angle: number
+  /** Schriftgröße in cm (wie TextStyle in Sweet Home 3D). */
+  fontSize: number
+  color: number | null
+  level: string | null
+}
+
+export const DEFAULT_LABEL_FONT_SIZE = 18
 
 export interface HomePiece {
   id: string
@@ -53,6 +105,8 @@ export interface HomePiece {
   /** Nur bei Türen und Fenstern gesetzt. */
   doorOrWindowInfo: DoorOrWindowInfo | null
   color: number | null
+  /** Textur über das ganze Modell; schließt {@code color} aus. */
+  texture?: TextureRef | null
   level: string | null
 }
 
@@ -112,6 +166,8 @@ export interface Home {
   walls: Wall[]
   rooms: Room[]
   furniture: HomePiece[]
+  dimensionLines: DimensionLine[]
+  labels: Label[]
   camera: { mode: CameraMode; observer: ObserverCamera }
 }
 
@@ -124,6 +180,8 @@ export function createEmptyHome(): Home {
     walls: [],
     rooms: [],
     furniture: [],
+    dimensionLines: [],
+    labels: [],
     camera: {
       mode: 'aerial',
       observer: { x: 50, y: 50, z: 170, yaw: Math.PI / 4, pitch: 0, fieldOfView: (63 * Math.PI) / 180 },
@@ -143,8 +201,17 @@ export function normalizeHome(raw: unknown): Home {
     walls: (home.walls ?? []).map((w) => ({ ...w, level: w.level ?? null })),
     rooms: (home.rooms ?? []).map((r) => ({ ...r, level: r.level ?? null })),
     furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null, level: p.level ?? null })),
+    dimensionLines: home.dimensionLines ?? [],
+    labels: home.labels ?? [],
     camera: home.camera ?? empty.camera,
   }
+}
+
+/** Alle Objekte, die auf einer Ebene liegen und im Plan ausgewählt werden können. */
+export type HomeItem = Wall | Room | HomePiece | DimensionLine | Label
+
+export function homeItems(home: Home): HomeItem[] {
+  return [...home.walls, ...home.rooms, ...home.furniture, ...home.dimensionLines, ...home.labels]
 }
 
 export function newId(prefix: string): string {

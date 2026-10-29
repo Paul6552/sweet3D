@@ -6,9 +6,10 @@ import { useTranslation } from 'react-i18next'
 import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
 import { pieceFromCatalog } from '../model/furniture'
-import { distance, toPieceLocal, wallLength, type Point } from '../model/geometry'
-import { newId, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
+import { dimensionLength, distance, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
+import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, onLevel } from '../model/levels'
+import { isDialogOpen, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
 import {
@@ -42,6 +43,12 @@ interface WallChain {
   previousId: string | null
 }
 
+/** Maßlinie im Entstehen: erst Start, dann Ende, dann Abstand. */
+interface DimensionDraft {
+  start: Point
+  end: Point | null
+}
+
 const HANDLE_TOLERANCE_PX = 8
 const SNAP_TOLERANCE_PX = 12
 const DRAG_THRESHOLD_PX = 3
@@ -56,6 +63,17 @@ function wallEnd(home: Home, chain: WallChain, point: Point, magnetism: boolean,
   const exclude = new Set(chain.previousId ? [chain.previousId] : [])
   const join = snapToFreeWallEnd(home, point, SNAP_TOLERANCE_PX / scale, exclude)
   return join ? { point: join.point, join } : { point: magnetizeWallEnd(chain.start, point, scale), join: null }
+}
+
+/**
+ * Punkt einer neuen Maßlinie: rastet an Wand- und Raumecken ein, sonst wie Wände in
+ * 15°-Schritten zum Startpunkt.
+ */
+function dimensionPoint(home: Home, start: Point | null, point: Point, magnetism: boolean, scale: number): Point {
+  if (!magnetism) return roundPoint(point)
+  const snapped = snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale)
+  if (snapped !== point) return roundPoint(snapped)
+  return start ? magnetizeWallEnd(start, point, scale) : roundPoint(point)
 }
 
 /** Befehl, den eine Mausaktion beim Loslassen ausführt (und der vorher als Vorschau dient). */
@@ -100,6 +118,24 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
       }
       return { type: 'updateFurniture', changes: [change] }
     }
+    case 'dimensionStart':
+    case 'dimensionEnd': {
+      // Der Griff sitzt auf der verschobenen Linie: den gemessenen Punkt um den Abstand zurückrechnen
+      const { line } = handle
+      const angle = Math.atan2(line.yEnd - line.yStart, line.xEnd - line.xStart)
+      const measured: Point = [current[0] + Math.sin(angle) * line.offset, current[1] - Math.cos(angle) * line.offset]
+      const fixed: Point = handle.kind === 'dimensionStart' ? [line.xEnd, line.yEnd] : [line.xStart, line.yStart]
+      const snapped = magnetism ? snapToPoints(measured, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : measured
+      const point = snapped === measured && magnetism ? magnetizeWallEnd(fixed, measured, scale) : roundPoint(snapped)
+      const change =
+        handle.kind === 'dimensionStart' ? { id: line.id, xStart: point[0], yStart: point[1] } : { id: line.id, xEnd: point[0], yEnd: point[1] }
+      return { type: 'updateDimensionLines', changes: [change] }
+    }
+    case 'dimensionOffset': {
+      const { line } = handle
+      const offset = round1(signedOffset([line.xStart, line.yStart], [line.xEnd, line.yEnd], current))
+      return { type: 'updateDimensionLines', changes: [{ id: line.id, offset }] }
+    }
     case 'wallStart':
     case 'wallEnd': {
       const { wall } = handle
@@ -131,7 +167,13 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
 /** Hinweistext am Mauszeiger während einer Aktion. */
 function gestureLabel(preview: Home, gesture: Gesture): string | null {
   if (gesture.kind === 'handle') {
-    const id = 'piece' in gesture.handle ? gesture.handle.piece.id : gesture.handle.wall.id
+    const { handle } = gesture
+    if ('line' in handle) {
+      const line = preview.dimensionLines.find((d) => d.id === handle.line.id)
+      if (!line) return null
+      return handle.kind === 'dimensionOffset' ? `${line.offset} cm` : `${round1(dimensionLength(line))} cm`
+    }
+    const id = 'piece' in handle ? handle.piece.id : handle.wall.id
     const piece = preview.furniture.find((p) => p.id === id)
     const wall = preview.walls.find((w) => w.id === id)
     if (gesture.handle.kind === 'rotate' && piece) return `${degrees(piece.angle)}°`
@@ -167,7 +209,12 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   const walls = useMemo(() => onLevel(fullHome.walls, levelId), [fullHome.walls, levelId])
   const rooms = useMemo(() => onLevel(fullHome.rooms, levelId), [fullHome.rooms, levelId])
   const furniture = useMemo(() => onLevel(fullHome.furniture, levelId), [fullHome.furniture, levelId])
-  const home = useMemo(() => ({ ...fullHome, walls, rooms, furniture }), [fullHome, walls, rooms, furniture])
+  const dimensionLines = useMemo(() => onLevel(fullHome.dimensionLines, levelId), [fullHome.dimensionLines, levelId])
+  const labels = useMemo(() => onLevel(fullHome.labels, levelId), [fullHome.labels, levelId])
+  const home = useMemo(
+    () => ({ ...fullHome, walls, rooms, furniture, dimensionLines, labels }),
+    [fullHome, walls, rooms, furniture, dimensionLines, labels],
+  )
   const belowId = levelBelow(fullHome)?.id
   const wallsBelow = useMemo(() => (belowId ? fullHome.walls.filter((w) => w.level === belowId) : undefined), [fullHome.walls, belowId])
   const selection = useEditorStore((s) => s.selection)
@@ -178,6 +225,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   const [pointer, setPointer] = useState<{ point: Point; alt: boolean } | null>(null)
   const [chain, setChain] = useState<WallChain | null>(null)
   const [roomPoints, setRoomPoints] = useState<Point[]>([])
+  const [dimension, setDimension] = useState<DimensionDraft | null>(null)
   const [cursorStyle, setCursorStyle] = useState('default')
   const spaceHeld = useRef(false)
   const hovered = useRef(false)
@@ -221,6 +269,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         if (state.mode !== previous.mode) {
           setChain(null)
           setRoomPoints([])
+          setDimension(null)
         }
       }),
     [],
@@ -266,6 +315,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   useEffect(() => {
     const isInput = (event: KeyboardEvent) => (event.target as HTMLElement | null)?.closest('input, textarea') != null
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isDialogOpen()) return
       const space = event.code === 'Space' || event.key === ' '
       // Steht die Maus über dem Plan, gehört die Leertaste ihm, auch wenn noch das Suchfeld
       // oder ein Knopf den Fokus hat (sonst tippt sie dort bzw. löst den Knopf aus)
@@ -283,6 +333,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         setGesture(null)
         setChain(null)
         setRoomPoints([])
+        setDimension(null)
       } else if (event.key === 'Enter' && roomPoints.length > 0) {
         finishRoom(roomPoints)
       }
@@ -322,7 +373,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         setGesture({ kind: 'handle', handle, current: point, magnetism: magnet })
         return
       }
-      const hit = hitItem(home, point)
+      const hit = hitItem(home, point, HANDLE_TOLERANCE_PX / scale)
       if (hit && event.shiftKey) {
         dispatch({ type: 'select', ids: selection.includes(hit.id) ? selection.filter((id) => id !== hit.id) : [...selection, hit.id] })
       } else if (hit) {
@@ -350,6 +401,29 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     } else if (mode === 'room') {
       const snapped = magnet ? snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : point
       setRoomPoints((points) => [...points, roundPoint(snapped)])
+    } else if (mode === 'dimension') {
+      if (!dimension) {
+        setDimension({ start: dimensionPoint(home, null, point, magnet, scale), end: null })
+      } else if (!dimension.end) {
+        const end = dimensionPoint(home, dimension.start, point, magnet, scale)
+        if (distance(dimension.start, end) >= 1) setDimension({ start: dimension.start, end })
+      } else {
+        const line: DimensionLine = {
+          id: newId('dimensionLine'),
+          xStart: dimension.start[0],
+          yStart: dimension.start[1],
+          xEnd: dimension.end[0],
+          yEnd: dimension.end[1],
+          offset: round1(signedOffset(dimension.start, dimension.end, point)),
+          level: null,
+        }
+        executeCommand({ type: 'addItems', dimensionLines: [line] })
+        dispatch({ type: 'select', ids: [line.id] })
+        setDimension(null)
+      }
+    } else if (mode === 'label') {
+      const [x, y] = roundPoint(point)
+      useDialogStore.getState().open({ kind: 'newLabel', x, y })
     }
   }
 
@@ -361,7 +435,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       if (mode === 'select' && !spaceHeld.current) {
         const observerPart = hitObserver(home, point, HANDLE_TOLERANCE_PX / scale)
         const handle = hitHandle(home, selection, point, HANDLE_TOLERANCE_PX / scale)
-        setCursorStyle(observerPart === 'rotate' ? 'grab' : observerPart ? 'move' : cursorFor(handle, hitItem(home, point) !== null))
+        setCursorStyle(observerPart === 'rotate' ? 'grab' : observerPart ? 'move' : cursorFor(handle, hitItem(home, point, HANDLE_TOLERANCE_PX / scale) !== null))
       } else {
         setCursorStyle(mode === 'pan' || spaceHeld.current ? 'grab' : 'crosshair')
       }
@@ -403,7 +477,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   }
 
   const onDoubleClick = (event: React.MouseEvent) => {
-    if (mode === 'wall') {
+    if (mode === 'select') {
+      const hit = hitItem(home, toPlan(event.clientX, event.clientY), HANDLE_TOLERANCE_PX / scale)
+      if (hit) openItemDialog(selection.includes(hit.id) ? selection : [hit.id])
+    } else if (mode === 'wall') {
       setChain(null)
     } else if (mode === 'room') {
       const points = roomPoints.filter((p, i) => i === 0 || distance(p, roomPoints[i - 1]) > 0.5)
@@ -465,6 +542,20 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const next = magnetNow ? snapToPoints(pointer.point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : pointer.point
     preview.roomPoints = [...roomPoints, next]
   }
+  if (mode === 'dimension' && dimension && pointer) {
+    const end = dimension.end ?? dimensionPoint(home, dimension.start, pointer.point, magnetNow, scale)
+    const line: DimensionLine = {
+      id: 'preview',
+      xStart: dimension.start[0],
+      yStart: dimension.start[1],
+      xEnd: end[0],
+      yEnd: end[1],
+      offset: dimension.end ? round1(signedOffset(dimension.start, dimension.end, pointer.point)) : 0,
+      level: null,
+    }
+    preview.dimensionLine = line
+    preview.label = { point: pointer.point, text: `${round1(dimensionLength(line))} cm` }
+  }
   if (gesture?.kind === 'rubberBand') preview.rubberBand = [gesture.start, gesture.current]
   if (gesture && pointer) {
     const text = gestureLabel(displayed, gesture)
@@ -477,8 +568,12 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       ? t(chain ? 'plan.hints.wallNext' : 'plan.hints.wallStart')
       : mode === 'room'
         ? t(roomPoints.length > 0 ? 'plan.hints.roomNext' : 'plan.hints.roomStart')
-        : mode === 'pan'
-          ? t('plan.hints.pan')
+        : mode === 'dimension'
+          ? t(!dimension ? 'plan.hints.dimensionStart' : !dimension.end ? 'plan.hints.dimensionEnd' : 'plan.hints.dimensionOffset')
+          : mode === 'label'
+            ? t('plan.hints.label')
+            : mode === 'pan'
+              ? t('plan.hints.pan')
           : t(handlePoints(home, selection).length > 0 ? 'plan.hints.selectHandles' : 'plan.hints.select')
   const cursorPoint = pointer?.point ?? null
   useEffect(() => {

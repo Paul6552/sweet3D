@@ -37,6 +37,8 @@ export function homeOnLevel(home: Home): Home {
     walls: home.walls.filter((w) => w.level === level),
     rooms: home.rooms.filter((r) => r.level === level),
     furniture: home.furniture.filter((p) => p.level === level),
+    dimensionLines: home.dimensionLines.filter((d) => d.level === level),
+    labels: home.labels.filter((l) => l.level === level),
   }
 }
 

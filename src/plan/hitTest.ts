@@ -1,7 +1,7 @@
-import type { Home, HomePiece, ObserverCamera, Wall } from '../model/home'
-import { distance, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
+import type { DimensionLine, Home, HomePiece, ObserverCamera, Wall } from '../model/home'
+import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
 
-export type ItemKind = 'piece' | 'wall' | 'room'
+export type ItemKind = 'piece' | 'wall' | 'room' | 'dimensionLine' | 'label'
 
 export interface Hit {
   kind: ItemKind
@@ -13,9 +13,22 @@ export type Handle =
   | { kind: 'resize'; piece: HomePiece }
   | { kind: 'wallStart'; wall: Wall }
   | { kind: 'wallEnd'; wall: Wall }
+  | { kind: 'dimensionStart'; line: DimensionLine }
+  | { kind: 'dimensionEnd'; line: DimensionLine }
+  | { kind: 'dimensionOffset'; line: DimensionLine }
 
-/** Oberstes Objekt am Punkt: Möbel vor Wänden vor Räumen (wie in Sweet Home 3D). */
-export function hitItem(home: Home, point: Point): Hit | null {
+/**
+ * Oberstes Objekt am Punkt: Texte und Maßlinien vor Möbeln vor Wänden vor Räumen (wie in
+ * Sweet Home 3D). {@code tolerance} in cm für die dünnen Maßlinien.
+ */
+export function hitItem(home: Home, point: Point, tolerance = 0): Hit | null {
+  for (let i = home.labels.length - 1; i >= 0; i--) {
+    if (pointInPolygon(point, labelCorners(home.labels[i]))) return { kind: 'label', id: home.labels[i].id }
+  }
+  for (let i = home.dimensionLines.length - 1; i >= 0; i--) {
+    const [a, b] = dimensionOffsetPoints(home.dimensionLines[i])
+    if (distanceToSegment(point, a, b) <= Math.max(tolerance, 2)) return { kind: 'dimensionLine', id: home.dimensionLines[i].id }
+  }
   for (let i = home.furniture.length - 1; i >= 0; i--) {
     const piece = home.furniture[i]
     if (piece.visible && pointInPolygon(point, pieceCorners(piece))) return { kind: 'piece', id: piece.id }
@@ -39,6 +52,15 @@ export function handlePoints(home: Home, selection: string[]): { handle: Handle;
     return [
       { handle: { kind: 'rotate', piece }, point: corners[0] },
       { handle: { kind: 'resize', piece }, point: corners[2] },
+    ]
+  }
+  const line = home.dimensionLines.find((d) => d.id === selection[0])
+  if (line) {
+    const [a, b] = dimensionOffsetPoints(line)
+    return [
+      { handle: { kind: 'dimensionStart', line }, point: a },
+      { handle: { kind: 'dimensionEnd', line }, point: b },
+      { handle: { kind: 'dimensionOffset', line }, point: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] },
     ]
   }
   const wall = home.walls.find((w) => w.id === selection[0])
@@ -66,6 +88,8 @@ export function itemsInRect(home: Home, a: Point, b: Point): string[] {
     ...home.furniture.filter((p) => p.visible && inside(pieceCorners(p))).map((p) => p.id),
     ...home.walls.filter((w) => inside([[w.xStart, w.yStart], [w.xEnd, w.yEnd]])).map((w) => w.id),
     ...home.rooms.filter((r) => inside(r.points)).map((r) => r.id),
+    ...home.dimensionLines.filter((d) => inside(dimensionOffsetPoints(d))).map((d) => d.id),
+    ...home.labels.filter((l) => inside([[l.x, l.y]])).map((l) => l.id),
   ]
 }
 
@@ -75,6 +99,8 @@ export function homeBounds(home: Home): { minX: number; minY: number; maxX: numb
     ...home.walls.flatMap((w): Point[] => [[w.xStart, w.yStart], [w.xEnd, w.yEnd]]),
     ...home.rooms.flatMap((r) => r.points),
     ...home.furniture.flatMap((p) => pieceCorners(p)),
+    ...home.dimensionLines.flatMap((d) => dimensionOffsetPoints(d)),
+    ...home.labels.map((l): Point => [l.x, l.y]),
   ]
   if (points.length === 0) return null
   return {

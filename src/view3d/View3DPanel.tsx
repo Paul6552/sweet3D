@@ -18,7 +18,9 @@ import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { Ground, HORIZON, Sky } from './Environment'
+import { useEditorContext } from '../editor/EditorContext'
 import { HomeScene } from './HomeScene'
+import { ThumbnailRecorder } from './ThumbnailRecorder'
 
 function sceneBounds(home: Home): SceneBounds {
   const b = homeBounds(home) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
@@ -59,6 +61,7 @@ function Lights({ bounds }: { bounds: SceneBounds }) {
 export function View3DPanel() {
   const { t } = useTranslation()
   const theme = useTheme()
+  const { projectId } = useEditorContext()
   const home = useEditorStore((s) => s.home)
   const selection = useEditorStore((s) => s.selection)
   const [fitRequest, setFitRequest] = useState(0)
@@ -71,7 +74,17 @@ export function View3DPanel() {
   const level = home?.selectedLevel
   const bounds = useMemo(
     () =>
-      sceneBounds({ walls: walls ?? [], furniture: furniture ?? [], rooms: rooms ?? [], wallHeight: wallHeight ?? 250, levels: levels ?? [], selectedLevel: level ?? null } as Home),
+      sceneBounds({
+        walls: walls ?? [],
+        furniture: furniture ?? [],
+        rooms: rooms ?? [],
+        // Maßlinien und Texte gibt es in 3D nicht
+        dimensionLines: [],
+        labels: [],
+        wallHeight: wallHeight ?? 250,
+        levels: levels ?? [],
+        selectedLevel: level ?? null,
+      } as unknown as Home),
     [walls, furniture, rooms, wallHeight, levels, level],
   )
   if (!home) return null
@@ -117,6 +130,7 @@ export function View3DPanel() {
           {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
           <Ground />
           <HomeScene home={home} selection={selection} selectionColor={theme.palette.primary.main} showCeilings={mode === 'observer'} />
+          <ThumbnailRecorder projectId={projectId} home={home} />
         </Canvas>
       </Box>
     </Box>

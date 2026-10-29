@@ -8,6 +8,7 @@ import TableRow from '@mui/material/TableRow'
 import Typography from '@mui/material/Typography'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { openItemDialog } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 
 const format = (value: number) => (Math.round(value * 10) / 10).toLocaleString()
@@ -51,6 +52,11 @@ export function FurnitureListPanel() {
                   ids: e.ctrlKey || e.metaKey ? [...selection, piece.id] : [piece.id],
                 })
               }
+              onDoubleClick={() => {
+                const ids = selection.includes(piece.id) ? selection.filter((id) => furniture.some((p) => p.id === id)) : [piece.id]
+                dispatch({ type: 'select', ids })
+                openItemDialog(ids)
+              }}
               sx={{ cursor: 'pointer' }}
             >
               <TableCell>{piece.name}</TableCell>

@@ -1,7 +1,19 @@
 import { strFromU8, unzip, type Unzipped } from 'fflate'
-import type { CatalogPiece } from '../api/catalog'
+import type { CatalogPiece, TexturesCatalog } from '../api/catalog'
+import { parseArgb } from '../model/colors'
 import { CONTENT_PREFIX, guessMime } from '../model/contents'
-import { createEmptyHome, type DoorOrWindowInfo, type Home, type HomePiece, type Level, type Room, type Wall } from '../model/home'
+import {
+  createEmptyHome,
+  DEFAULT_LABEL_FONT_SIZE,
+  type DoorOrWindowInfo,
+  type Home,
+  type HomePiece,
+  type Level,
+  type Room,
+  type Surface,
+  type TextureRef,
+  type Wall,
+} from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
 
@@ -22,14 +34,15 @@ export class Sh3dImportError extends Error {
   }
 }
 
-const FURNITURE_ELEMENTS = new Set(['pieceOfFurniture', 'doorOrWindow', 'light'])
+// Regale (shelfUnit) werden wie normale Möbel übernommen, ohne ihre Fächer
+const FURNITURE_ELEMENTS = new Set(['pieceOfFurniture', 'doorOrWindow', 'light', 'shelfUnit'])
 
 /**
  * Liest eine .sh3d-Datei über ihren Eintrag Home.xml (Sweet Home 3D ab 5.3). Möbel aus dem
  * Standardkatalog verweisen auf dessen Modelle; alle anderen Modelle und Symbole werden als
  * Blobs übernommen.
  */
-export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Promise<ImportResult> {
+export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], textures: TexturesCatalog | null = null): Promise<ImportResult> {
   let files: Unzipped
   try {
     // Entpackt in Hintergrund-Threads, damit große Dateien die Oberfläche nicht blockieren
@@ -99,6 +112,21 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
     return ref
   }
 
+  // Texturen aus dem Standardkatalog verweisen auf dessen Bilder, alle anderen werden übernommen
+  const catalogTextures = new Map((textures?.categories ?? []).flatMap((c) => c.textures).map((t) => [t.id, t.image]))
+  const textureOf = (parent: Element, attribute: string | null): TextureRef | null => {
+    const e = [...parent.children].find((c) => c.nodeName === 'texture' && c.getAttribute('attribute') === attribute)
+    if (!e) return null
+    const catalogId = e.getAttribute('catalogId')
+    const image = (catalogId && catalogTextures.get(catalogId)) || content(e.getAttribute('image'))
+    if (!image) return null
+    return { catalogId, name: e.getAttribute('name') ?? '', image, width: num(e, 'width') ?? 100, height: num(e, 'height') ?? 100 }
+  }
+  const surfaceOf = (e: Element, colorAttribute: string, textureAttribute: string): Surface | undefined => {
+    const surface = { color: parseArgb(e.getAttribute(colorAttribute)), texture: textureOf(e, textureAttribute) }
+    return surface.color === null && !surface.texture ? undefined : surface
+  }
+
   let missingModels = 0
   const readPiece = (e: Element, level: string | null) => {
     const catalogPiece = byCatalogId.get(e.getAttribute('catalogId') ?? '')
@@ -126,7 +154,8 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       planIcon: catalogPiece ? catalogPiece.planIcon : content(e.getAttribute('planIcon')),
       doorOrWindow,
       doorOrWindowInfo: doorOrWindow ? doorInfo(e) : null,
-      color: e.getAttribute('color') ? Number.parseInt(e.getAttribute('color')!, 16) | 0 : null,
+      color: parseArgb(e.getAttribute('color')),
+      texture: textureOf(e, null),
       level,
     }
     home.furniture.push(piece)
@@ -161,6 +190,8 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       thickness: num(e, 'thickness') ?? 10,
       height: height && height > 0 ? height : null,
       level: levelOf(e),
+      leftSide: surfaceOf(e, 'leftSideColor', 'leftSideTexture'),
+      rightSide: surfaceOf(e, 'rightSideColor', 'rightSideTexture'),
     }
   })
 
@@ -173,8 +204,36 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[]): Pro
       floorVisible: e.getAttribute('floorVisible') !== 'false',
       ceilingVisible: e.getAttribute('ceilingVisible') !== 'false',
       level: levelOf(e),
+      floor: surfaceOf(e, 'floorColor', 'floorTexture'),
+      ceiling: surfaceOf(e, 'ceilingColor', 'ceilingTexture'),
     }))
     .filter((room) => room.points.length >= 3)
+
+  const children = (name: string) => [...root.children].filter((e) => e.nodeName === name)
+  home.dimensionLines = children('dimensionLine').map((e) => ({
+    id: e.getAttribute('id') ?? `dimensionLine-${crypto.randomUUID()}`,
+    xStart: num(e, 'xStart') ?? 0,
+    yStart: num(e, 'yStart') ?? 0,
+    xEnd: num(e, 'xEnd') ?? 0,
+    yEnd: num(e, 'yEnd') ?? 0,
+    offset: num(e, 'offset') ?? 0,
+    level: levelOf(e),
+  }))
+  home.labels = children('label')
+    .map((e) => {
+      const style = [...e.children].find((c) => c.nodeName === 'textStyle' && !c.getAttribute('attribute'))
+      return {
+        id: e.getAttribute('id') ?? `label-${crypto.randomUUID()}`,
+        text: [...e.children].find((c) => c.nodeName === 'text')?.textContent ?? '',
+        x: num(e, 'x') ?? 0,
+        y: num(e, 'y') ?? 0,
+        angle: num(e, 'angle') ?? 0,
+        fontSize: (style && num(style, 'fontSize')) ?? DEFAULT_LABEL_FONT_SIZE,
+        color: parseArgb(e.getAttribute('color')),
+        level: levelOf(e),
+      }
+    })
+    .filter((label) => label.text.trim() !== '')
 
   const observer = [...root.children].find((e) => e.nodeName === 'observerCamera' && e.getAttribute('attribute') === 'observerCamera')
   if (observer) {

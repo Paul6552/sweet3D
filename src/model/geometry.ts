@@ -1,4 +1,4 @@
-import type { HomePiece, Wall } from './home'
+import type { DimensionLine, HomePiece, Label, Wall } from './home'
 
 /** Punkt im Plan (cm). */
 export type Point = [number, number]
@@ -143,4 +143,57 @@ export function projectOnSegment(p: Point, a: Point, b: Point): { point: Point; 
 
 export function rectContains(rect: { x1: number; y1: number; x2: number; y2: number }, [x, y]: Point): boolean {
   return x >= Math.min(rect.x1, rect.x2) && x <= Math.max(rect.x1, rect.x2) && y >= Math.min(rect.y1, rect.y2) && y <= Math.max(rect.y1, rect.y2)
+}
+
+/** Abstand eines Punkts von der Strecke a–b. */
+export function distanceToSegment(p: Point, a: Point, b: Point): number {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const lengthSquared = dx * dx + dy * dy
+  const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / lengthSquared))
+  return distance(p, [a[0] + t * dx, a[1] + t * dy])
+}
+
+export function dimensionLength(line: Pick<DimensionLine, 'xStart' | 'yStart' | 'xEnd' | 'yEnd'>): number {
+  return Math.hypot(line.xEnd - line.xStart, line.yEnd - line.yStart)
+}
+
+/**
+ * Lage der eigentlichen Maßlinie: wie in Sweet Home 3D um {@code offset} senkrecht zur
+ * gemessenen Strecke verschoben, positiv nach rechts in Messrichtung (im Plan unten bei einer
+ * Strecke nach rechts).
+ */
+export function dimensionOffsetPoints(line: DimensionLine): [Point, Point] {
+  const angle = Math.atan2(line.yEnd - line.yStart, line.xEnd - line.xStart)
+  const ox = -Math.sin(angle) * line.offset
+  const oy = Math.cos(angle) * line.offset
+  return [
+    [line.xStart + ox, line.yStart + oy],
+    [line.xEnd + ox, line.yEnd + oy],
+  ]
+}
+
+/** Abstand eines Punkts von der Messstrecke, mit Vorzeichen wie {@code offset}. */
+export function signedOffset(start: Point, end: Point, point: Point): number {
+  const angle = Math.atan2(end[1] - start[1], end[0] - start[0])
+  return (point[0] - start[0]) * -Math.sin(angle) + (point[1] - start[1]) * Math.cos(angle)
+}
+
+/**
+ * Ungefährer Umriss eines Texts (Breite aus der Zeichenzahl geschätzt) für Trefferprüfung
+ * und Auswahl; (x, y) ist die Mitte der Grundlinie der letzten Zeile.
+ */
+export function labelCorners(label: Label): Point[] {
+  const lines = label.text.split('\n')
+  const width = Math.max(...lines.map((l) => l.length), 1) * label.fontSize * 0.55
+  const height = lines.length * label.fontSize * 1.2
+  const local: Point[] = [
+    [-width / 2, -height + label.fontSize * 0.2],
+    [width / 2, -height + label.fontSize * 0.2],
+    [width / 2, label.fontSize * 0.25],
+    [-width / 2, label.fontSize * 0.25],
+  ]
+  const cos = Math.cos(label.angle)
+  const sin = Math.sin(label.angle)
+  return local.map(([x, y]) => [label.x + x * cos - y * sin, label.y + x * sin + y * cos])
 }

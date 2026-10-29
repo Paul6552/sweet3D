@@ -13,6 +13,7 @@ import Typography from '@mui/material/Typography'
 import { useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DialogHost } from '../dialogs/DialogHost'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { startFollower } from '../sync/follower'
 import { saveOwnPlacement } from '../sync/windows'
@@ -126,6 +127,7 @@ export function PanelWindowPage() {
           </Box>
         )}
       </PanelFrame>
+      <DialogHost />
     </EditorContext.Provider>
   )
 }

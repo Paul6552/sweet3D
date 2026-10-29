@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isDialogOpen } from '../dialogs/dialogStore'
 import { homeOnLevel } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { copySelection, pasteCommand } from './clipboard'
@@ -8,7 +9,7 @@ export function useShortcuts() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      if (target?.closest('input, textarea, [contenteditable="true"]') || isDialogOpen()) return
       const mod = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
       const { home, selection } = useEditorStore.getState()
@@ -21,7 +22,7 @@ export function useShortcuts() {
       } else if (mod && key === 'a' && home) {
         event.preventDefault()
         const level = homeOnLevel(home)
-        dispatch({ type: 'select', ids: [...level.walls, ...level.rooms, ...level.furniture.filter((p) => p.visible)].map((i) => i.id) })
+        dispatch({ type: 'select', ids: [...level.walls, ...level.rooms, ...level.furniture.filter((p) => p.visible), ...level.dimensionLines, ...level.labels].map((i) => i.id) })
       } else if (mod && (key === 'c' || key === 'x') && home && selection.length > 0) {
         event.preventDefault()
         copySelection(home, selection)

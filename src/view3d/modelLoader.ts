@@ -9,6 +9,9 @@ import {
   type Material,
   Matrix4,
   Mesh,
+  MeshLambertMaterial,
+  MeshPhongMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   SkinnedMesh,
   TextureLoader,
@@ -84,15 +87,18 @@ function loadModel(ref: string): Promise<Group> {
       const format = modelFormat(ref, bytes)
       const object = await parseModel(format, bytes, base, manager)
       const converted = new Map<Material, Material>()
+      const panes = new Map<Material, Material>()
       object.traverse((child) => {
         if (!(child instanceof Mesh)) return
         const info = (child.userData.mtl ?? {}) as Record<string, MtlInfo>
+        const pane = isWindowPane(child)
         const convert = (m: Material) => {
-          let result = converted.get(m)
+          const cache = pane ? panes : converted
+          let result = cache.get(m)
           if (!result) {
-            result = patchIndoorLight(toPbr(m, info[m.name], (path) => new TextureLoader(manager).load(base + path)))
+            result = patchIndoorLight(toPbr(pane ? windowPane(m) : m, info[m.name], (path) => new TextureLoader(manager).load(base + path)))
             result.side = DoubleSide
-            converted.set(m, result)
+            cache.set(m, result)
           }
           return result
         }
@@ -109,6 +115,37 @@ function loadModel(ref: string): Promise<Group> {
     models.set(ref, model)
   }
   return model
+}
+
+/** Deckkraft von Fensterscheiben, deren Material deckend ist (wie „glasstransparent“ in Sweet Home 3D). */
+const WINDOW_PANE_OPACITY = 0.25
+
+/**
+ * Teil einer Fensterscheibe nach der Namenskonvention von Sweet Home 3D (z. B.
+ * „sweethome3d_window_pane_on_hinge_1“). In Collada- und 3DS-Modellen kann der Name auch an einem
+ * übergeordneten Knoten stehen.
+ */
+function isWindowPane(mesh: Object3D): boolean {
+  for (let node: Object3D | null = mesh; node; node = node.parent) {
+    if (node.name.startsWith('sweethome3d_window_pane')) return true
+  }
+  return false
+}
+
+/**
+ * Durchsichtige Kopie eines Scheibenmaterials. Die Katalogmodelle verwenden dafür deckende
+ * Materialien (z. B. „flltgrey“); toPbr macht aus dem Ergebnis Glas.
+ */
+function windowPane(material: Material): Material {
+  const pane = material.clone()
+  pane.transparent = true
+  pane.opacity = Math.min(material.opacity, WINDOW_PANE_OPACITY)
+  // glTF-Materialien übernimmt toPbr unverändert
+  if (!(material instanceof MeshPhongMaterial || material instanceof MeshLambertMaterial)) {
+    pane.depthWrite = false
+    if (pane instanceof MeshPhysicalMaterial) pane.userData.glass = true
+  }
+  return pane
 }
 
 /** Glas wirft keinen Schatten, sonst fiele keine Sonne durch die Fenster (die Schattenkarte kennt keine Transparenz). */

@@ -189,6 +189,86 @@ export interface ObserverCamera {
 
 export type CameraMode = 'aerial' | 'observer'
 
+/**
+ * Kompass wie in Sweet Home 3D: Lage im Plan, Nordrichtung und geografische Lage des Projekts;
+ * daraus und aus der Uhrzeit der Kamera ergibt sich der Sonnenstand.
+ */
+export interface Compass {
+  x: number
+  y: number
+  diameter: number
+  /** Richtung nach Norden in Radiant, im Uhrzeigersinn ab Plan-oben. */
+  northDirection: number
+  /** Breitengrad in Radiant, Norden positiv. */
+  latitude: number
+  /** Längengrad in Radiant, Osten positiv. */
+  longitude: number
+  /** IANA-Zeitzone, in der Datum und Uhrzeit angezeigt werden, z. B. Europe/Vienna. */
+  timeZone: string
+  visible: boolean
+}
+
+/** Bekannte Orte je Zeitzone (Breite, Länge in Grad), damit neue Projekte ungefähr richtig liegen. */
+const PLACES: Record<string, [number, number]> = {
+  'Europe/Vienna': [48.21, 16.37],
+  'Europe/Berlin': [52.52, 13.4],
+  'Europe/Zurich': [47.37, 8.54],
+  'Europe/Paris': [48.86, 2.35],
+  'Europe/London': [51.51, -0.13],
+  'Europe/Rome': [41.9, 12.5],
+  'Europe/Madrid': [40.42, -3.7],
+  'Europe/Amsterdam': [52.37, 4.9],
+  'Europe/Brussels': [50.85, 4.35],
+  'Europe/Prague': [50.08, 14.44],
+  'Europe/Warsaw': [52.23, 21.01],
+  'Europe/Budapest': [47.5, 19.04],
+  'Europe/Stockholm': [59.33, 18.07],
+  'Europe/Copenhagen': [55.68, 12.57],
+  'America/New_York': [40.71, -74.01],
+  'America/Chicago': [41.88, -87.63],
+  'America/Los_Angeles': [34.05, -118.24],
+}
+
+export function defaultCompass(): Compass {
+  let timeZone = 'Europe/Vienna'
+  try {
+    timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || timeZone
+  } catch {
+    // Ohne Intl bleibt es bei Wien
+  }
+  const [latitude, longitude] = PLACES[timeZone] ?? PLACES['Europe/Vienna']
+  return {
+    x: -100,
+    y: 50,
+    diameter: 100,
+    northDirection: 0,
+    latitude: (latitude * Math.PI) / 180,
+    longitude: (longitude * Math.PI) / 180,
+    timeZone,
+    visible: true,
+  }
+}
+
+/**
+ * Platz für den Kompass links oben neben Wänden und Räumen (wie die Standardlage in Sweet Home 3D
+ * neben einem Haus am Ursprung); {@code null}, wenn es noch nichts gibt.
+ */
+export function compassBesideHome(home: Pick<Home, 'walls' | 'rooms'>, diameter: number): { x: number; y: number } | null {
+  const points = [...home.walls.flatMap((w) => [[w.xStart, w.yStart], [w.xEnd, w.yEnd]]), ...home.rooms.flatMap((r) => r.points)]
+  if (points.length === 0) return null
+  const minX = Math.min(...points.map((p) => p[0]))
+  const minY = Math.min(...points.map((p) => p[1]))
+  // Abstand reicht auch für die Mindestgröße, mit der der Plan den Kompass bei kleinem Zoom zeichnet
+  const gap = Math.max(diameter, 400)
+  return { x: Math.round(minX - gap), y: Math.round(minY + gap / 2) }
+}
+
+/** Heute 12 Uhr Ortszeit des Browsers, wie die Standardzeit der Kamera in Sweet Home 3D. */
+export function defaultTime(): number {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
+}
+
 export interface Home {
   formatVersion: 1
   wallHeight: number
@@ -201,7 +281,9 @@ export interface Home {
   furniture: HomePiece[]
   dimensionLines: DimensionLine[]
   labels: Label[]
-  camera: { mode: CameraMode; observer: ObserverCamera }
+  /** {@code time}: Zeitpunkt für den Sonnenstand in ms seit 1970 (UTC). */
+  camera: { mode: CameraMode; observer: ObserverCamera; time: number }
+  compass: Compass
   /**
    * Benutzerdefinierte Bibliotheken, aus denen Möbel oder Texturen stammen, auch wenn sie hier
    * nicht installiert sind (z. B. aus einer weitergegebenen Datei), siehe catalog/libraries.ts.
@@ -223,7 +305,9 @@ export function createEmptyHome(): Home {
     camera: {
       mode: 'aerial',
       observer: { x: 50, y: 50, z: 170, yaw: Math.PI / 4, pitch: 0, fieldOfView: (63 * Math.PI) / 180 },
+      time: defaultTime(),
     },
+    compass: defaultCompass(),
   }
 }
 
@@ -231,17 +315,22 @@ export function createEmptyHome(): Home {
 export function normalizeHome(raw: unknown): Home {
   const home = (raw && typeof raw === 'object' ? raw : {}) as Partial<Home>
   const empty = createEmptyHome()
+  const walls = (home.walls ?? []).map((w) => ({ ...w, level: w.level ?? null }))
+  const rooms = (home.rooms ?? []).map((r) => ({ ...r, level: r.level ?? null }))
+  // Projekte von vor dem Kompass: neben das Haus legen, sonst liegt er irgendwo außerhalb des Plans
+  const compass = home.compass ? { ...empty.compass, ...home.compass } : { ...empty.compass, ...compassBesideHome({ walls, rooms }, empty.compass.diameter) }
   return {
     formatVersion: 1,
     wallHeight: home.wallHeight ?? empty.wallHeight,
     levels: home.levels ?? [],
     selectedLevel: home.selectedLevel ?? null,
-    walls: (home.walls ?? []).map((w) => ({ ...w, level: w.level ?? null })),
-    rooms: (home.rooms ?? []).map((r) => ({ ...r, level: r.level ?? null })),
+    walls,
+    rooms,
     furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null, level: p.level ?? null })),
     dimensionLines: home.dimensionLines ?? [],
     labels: home.labels ?? [],
-    camera: home.camera ?? empty.camera,
+    camera: { ...empty.camera, ...home.camera },
+    compass,
     ...(home.libraries && home.libraries.length > 0 ? { libraries: home.libraries } : {}),
   }
 }

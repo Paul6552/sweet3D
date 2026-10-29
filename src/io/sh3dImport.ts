@@ -3,6 +3,7 @@ import type { CatalogPiece, TexturesCatalog } from '../api/catalog'
 import { parseArgb } from '../model/colors'
 import { CONTENT_PREFIX, guessMime } from '../model/contents'
 import {
+  compassBesideHome,
   createEmptyHome,
   DEFAULT_LABEL_FONT_SIZE,
   type DoorOrWindowInfo,
@@ -294,6 +295,26 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
     }
   }
   home.camera.mode = root.getAttribute('camera') === 'observerCamera' ? 'observer' : 'aerial'
+  // Uhrzeit für den Sonnenstand von der aktiven Kamera, sonst von irgendeiner
+  const cameras = [...root.children].filter((e) => e.nodeName === 'observerCamera' || e.nodeName === 'camera')
+  const activeCamera = cameras.find((e) => e.getAttribute('attribute') === (home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'))
+  home.camera.time = [activeCamera, ...cameras].map((e) => e && num(e, 'time')).find((time) => time != null) ?? home.camera.time
+
+  const compass = [...root.children].find((e) => e.nodeName === 'compass')
+  if (!compass) Object.assign(home.compass, compassBesideHome(home, home.compass.diameter))
+  if (compass) {
+    const defaults = home.compass
+    home.compass = {
+      x: num(compass, 'x') ?? defaults.x,
+      y: num(compass, 'y') ?? defaults.y,
+      diameter: num(compass, 'diameter') ?? defaults.diameter,
+      northDirection: num(compass, 'northDirection') ?? defaults.northDirection,
+      latitude: num(compass, 'latitude') ?? defaults.latitude,
+      longitude: num(compass, 'longitude') ?? defaults.longitude,
+      timeZone: compass.getAttribute('timeZone') ?? defaults.timeZone,
+      visible: compass.getAttribute('visible') !== 'false',
+    }
+  }
 
   return { home, contents, missingModels }
 }

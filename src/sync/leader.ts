@@ -71,6 +71,7 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
       case 'camera': {
         const [next, patches] = produceWithPatches(home, (draft) => {
           if (action.camera.mode) draft.camera.mode = action.camera.mode
+          if (action.camera.time !== undefined) draft.camera.time = action.camera.time
           if (action.camera.observer) Object.assign(draft.camera.observer, action.camera.observer)
         })
         if (patches.length > 0) applyAndBroadcast(next, patches)

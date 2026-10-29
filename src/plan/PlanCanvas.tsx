@@ -9,9 +9,9 @@ import { pieceFromCatalog } from '../model/furniture'
 import { dimensionLength, distance, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, onLevel } from '../model/levels'
-import { isDialogOpen, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
+import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
-import { handlePoints, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
+import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
 import {
   magnetizeWallEnd,
   normalizeAngle,
@@ -34,6 +34,7 @@ type Gesture =
   | { kind: 'move'; start: Point; current: Point; ids: string[]; magnetism: boolean }
   | { kind: 'handle'; handle: Handle; current: Point; magnetism: boolean }
   | { kind: 'observer'; part: 'move' | 'rotate'; start: Point; camera: ObserverCamera }
+  | { kind: 'compass'; start: Point; current: Point }
 
 /** Wandkette im Wand-Modus: Startpunkt der nächsten Wand und woran sie anschließt. */
 interface WallChain {
@@ -88,6 +89,12 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
       if (snapped) return { type: 'updateFurniture', changes: [{ id: piece.id, ...snapped }] }
     }
     return { type: 'moveItems', ids: gesture.ids, dx, dy }
+  }
+  if (gesture.kind === 'compass') {
+    const dx = round1(gesture.current[0] - gesture.start[0])
+    const dy = round1(gesture.current[1] - gesture.start[1])
+    if (dx === 0 && dy === 0) return null
+    return { type: 'updateCompass', change: { x: round1(home.compass.x + dx), y: round1(home.compass.y + dy) } }
   }
   if (gesture.kind !== 'handle') return null
   const { handle, current, magnetism } = gesture
@@ -380,6 +387,9 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         const ids = selection.includes(hit.id) ? selection : [hit.id]
         if (!selection.includes(hit.id)) dispatch({ type: 'select', ids })
         setGesture({ kind: 'move', start: point, current: point, ids, magnetism: magnet })
+      } else if (!event.shiftKey && hitCompass(home, point, scale, HANDLE_TOLERANCE_PX / scale)) {
+        if (selection.length > 0) dispatch({ type: 'select', ids: [] })
+        setGesture({ kind: 'compass', start: point, current: point })
       } else {
         if (!event.shiftKey && selection.length > 0) dispatch({ type: 'select', ids: [] })
         setGesture({ kind: 'rubberBand', start: point, current: point, base: event.shiftKey ? selection : [] })
@@ -435,7 +445,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       if (mode === 'select' && !spaceHeld.current) {
         const observerPart = hitObserver(home, point, HANDLE_TOLERANCE_PX / scale)
         const handle = hitHandle(home, selection, point, HANDLE_TOLERANCE_PX / scale)
-        setCursorStyle(observerPart === 'rotate' ? 'grab' : observerPart ? 'move' : cursorFor(handle, hitItem(home, point, HANDLE_TOLERANCE_PX / scale) !== null))
+        const overItem = hitItem(home, point, HANDLE_TOLERANCE_PX / scale) !== null || hitCompass(home, point, scale, HANDLE_TOLERANCE_PX / scale)
+        setCursorStyle(observerPart === 'rotate' ? 'grab' : observerPart ? 'move' : cursorFor(handle, overItem))
       } else {
         setCursorStyle(mode === 'pan' || spaceHeld.current ? 'grab' : 'crosshair')
       }
@@ -458,9 +469,9 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     }
     // Kleine Zitterbewegungen beim Klicken nicht als Verschieben werten
     const start = pressStart.current
-    if (gesture.kind === 'move' && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < DRAG_THRESHOLD_PX) return
+    if ((gesture.kind === 'move' || gesture.kind === 'compass') && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < DRAG_THRESHOLD_PX) return
     const magnet = magnetism !== event.altKey
-    setGesture(gesture.kind === 'rubberBand' ? { ...gesture, current: point } : { ...gesture, current: point, magnetism: magnet })
+    setGesture(gesture.kind === 'rubberBand' || gesture.kind === 'compass' ? { ...gesture, current: point } : { ...gesture, current: point, magnetism: magnet })
   }
 
   const onPointerUp = () => {
@@ -478,8 +489,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
 
   const onDoubleClick = (event: React.MouseEvent) => {
     if (mode === 'select') {
-      const hit = hitItem(home, toPlan(event.clientX, event.clientY), HANDLE_TOLERANCE_PX / scale)
+      const point = toPlan(event.clientX, event.clientY)
+      const hit = hitItem(home, point, HANDLE_TOLERANCE_PX / scale)
       if (hit) openItemDialog(selection.includes(hit.id) ? selection : [hit.id])
+      else if (hitCompass(home, point, scale, HANDLE_TOLERANCE_PX / scale)) openCompassDialog()
     } else if (mode === 'wall') {
       setChain(null)
     } else if (mode === 'room') {

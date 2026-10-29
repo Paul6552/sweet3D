@@ -1,4 +1,4 @@
-import type { DimensionLine, Home, HomePiece, ObserverCamera, Wall } from '../model/home'
+import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Wall } from '../model/home'
 import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
 
 export type ItemKind = 'piece' | 'wall' | 'room' | 'dimensionLine' | 'label'
@@ -125,4 +125,18 @@ export function hitObserver(home: Home, point: Point, tolerance: number): 'move'
   if (distance(observerHandle(observer), point) <= tolerance) return 'rotate'
   if (distance([observer.x, observer.y], point) <= OBSERVER_RADIUS + tolerance / 2) return 'move'
   return null
+}
+
+/** Kleinster Durchmesser des Kompasses am Bildschirm in Pixeln, damit er bei kleinem Zoom lesbar bleibt. */
+const COMPASS_MIN_PX = 64
+
+/** Radius des Kompasses im Plan (cm): sein Durchmesser, aber am Bildschirm nie kleiner als COMPASS_MIN_PX. */
+export function compassRadius(compass: Compass, scale: number): number {
+  return Math.max(compass.diameter, COMPASS_MIN_PX / scale) / 2
+}
+
+/** Trifft der Punkt den sichtbaren Kompass? */
+export function hitCompass(home: Home, point: Point, scale: number, tolerance: number): boolean {
+  const { compass } = home
+  return compass.visible && distance([compass.x, compass.y], point) <= compassRadius(compass, scale) + tolerance
 }

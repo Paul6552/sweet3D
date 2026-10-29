@@ -11,7 +11,7 @@ import {
   type Texture,
   TextureLoader,
 } from 'three'
-import { createSky, ENVIRONMENT_INTENSITY, GROUND_BOUNCE } from './sky'
+import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
 
 /** Rasen aus dem Texturkatalog von Sweet Home 3D. */
 const GRASS = '/catalog/resources/textures/grass.jpg'
@@ -39,22 +39,28 @@ function mixTiles(shader: { fragmentShader: string }) {
  * (scene.environment): alle physikalisch basierten Materialien werden vom Himmel beleuchtet
  * und spiegeln ihn je nach Rauheit.
  */
-export function Sky({ environmentSize }: { environmentSize: number }) {
+export function Sky({ environmentSize, daylight }: { environmentSize: number; daylight: Daylight }) {
   const gl = useThree((s) => s.gl)
   const get = useThree((s) => s.get)
+  const { direction, environmentIntensity } = daylight
   const sky = useMemo(() => {
-    const created = createSky()
+    const created = createSky(direction)
     created.scale.setScalar(SKY_RADIUS)
     created.renderOrder = -1
     created.frustumCulled = false
     // Im Foto-Modus liefert die Umgebung den Himmel
     created.userData.photo = false
     return created
+    // Neue Richtung kommt über das Uniform unten, die Kuppel bleibt
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  useEffect(() => {
+    sky.material.uniforms.sunPosition.value.copy(direction)
+  }, [sky, direction])
   useEffect(() => {
     const generator = new PMREMGenerator(gl)
     const environment = new Scene()
-    const envSky = createSky()
+    const envSky = createSky(direction)
     envSky.scale.setScalar(50)
     // Wolken bewegen sich nicht, damit das Umgebungslicht nur einmal berechnet werden muss
     envSky.material.uniforms.cloudCoverage.value = 0.25
@@ -65,7 +71,6 @@ export function Sky({ environmentSize }: { environmentSize: number }) {
     const target = generator.fromScene(environment, 0, 0.1, 100, { size: environmentSize })
     const { scene } = get()
     scene.environment = target.texture
-    scene.environmentIntensity = ENVIRONMENT_INTENSITY
     return () => {
       scene.environment = null
       target.dispose()
@@ -75,7 +80,10 @@ export function Sky({ environmentSize }: { environmentSize: number }) {
       ground.geometry.dispose()
       ground.material.dispose()
     }
-  }, [gl, get, environmentSize])
+  }, [gl, get, environmentSize, direction])
+  useEffect(() => {
+    get().scene.environmentIntensity = environmentIntensity
+  }, [get, environmentIntensity])
   useEffect(() => () => {
     sky.geometry.dispose()
     sky.material.dispose()

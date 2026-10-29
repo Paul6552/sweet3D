@@ -31,7 +31,7 @@ import {
 } from 'three'
 import { WebGLPathTracer } from 'three-gpu-pathtracer'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
-import { createSky, ENVIRONMENT_INTENSITY, GROUND_BOUNCE } from './sky'
+import { createSky, GROUND_BOUNCE } from './sky'
 
 /** Szene und Kamera der 3D-Ansicht zum Zeitpunkt des Fotos. */
 export interface SceneHandle {
@@ -66,6 +66,8 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
     return result
   }
   source.updateMatrixWorld(true)
+  // Sonnenstand wie in der 3D-Ansicht: Richtung von der Sonne zum Ziel
+  const sunDirection = new Vector3(0, 1, 0)
   source.traverseVisible((object) => {
     if (object.userData.photo === false) return
     if (object instanceof Mesh) {
@@ -79,6 +81,7 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
       light.position.setFromMatrixPosition(object.matrixWorld)
       light.target.position.setFromMatrixPosition(object.target.matrixWorld)
       scene.add(light, light.target)
+      sunDirection.subVectors(light.position, light.target.position).normalize()
     } else if (object instanceof PointLight) {
       const light = new PointLight(object.color, object.intensity, object.distance, object.decay)
       light.position.setFromMatrixPosition(object.matrixWorld)
@@ -88,7 +91,7 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
   // Himmel als Würfelumgebung im Kontext des Foto-Renderers
   const target = new WebGLCubeRenderTarget(512)
   const environment = new ThreeScene()
-  const sky = createSky()
+  const sky = createSky(sunDirection)
   sky.scale.setScalar(50)
   const ground = new Mesh(new CircleGeometry(40, 32), new MeshBasicMaterial({ color: GROUND_BOUNCE }))
   ground.rotation.x = -Math.PI / 2
@@ -96,7 +99,7 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
   environment.add(sky, ground)
   new CubeCamera(0.1, 100, target).update(renderer, environment)
   scene.environment = target.texture
-  scene.environmentIntensity = ENVIRONMENT_INTENSITY
+  scene.environmentIntensity = source.environmentIntensity
   scene.background = target.texture
   return {
     scene,

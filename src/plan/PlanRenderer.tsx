@@ -2,9 +2,9 @@ import { useTheme } from '@mui/material/styles'
 import { memo, useCallback, useMemo } from 'react'
 import { Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import { argbToCss } from '../model/colors'
-import type { DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Wall } from '../model/home'
+import type { Compass, DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Wall } from '../model/home'
 import { dimensionLength, dimensionOffsetPoints, labelCorners, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
-import { handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
+import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
 import { useResolvedRef } from '../storage/contents'
 import { useImage } from './useImage'
@@ -239,6 +239,31 @@ function Observer({ observer, scale, color, paper }: { observer: ObserverCamera;
   )
 }
 
+/**
+ * Kompassrose wie in Sweet Home 3D: Kreis mit Teilstrichen und Nordpfeil, gedreht um die Nordrichtung.
+ * Die Größe ist in cm und wächst beim Zoomen mit, bleibt aber am Bildschirm immer lesbar (siehe compassRadius).
+ */
+function CompassRose({ compass, scale, color, paper }: { compass: Compass; scale: number; color: string; paper: string }) {
+  const r = compassRadius(compass, scale)
+  const ticks = Array.from({ length: 24 }, (_, i) => {
+    const angle = (i * Math.PI) / 12
+    const inner = i % 6 === 0 ? r * 0.78 : r * 0.88
+    return [Math.sin(angle) * inner, -Math.cos(angle) * inner, Math.sin(angle) * r, -Math.cos(angle) * r]
+  })
+  return (
+    <Group x={compass.x} y={compass.y} rotation={(compass.northDirection * 180) / Math.PI} listening={false}>
+      <Circle radius={r} stroke={color} strokeWidth={1.2 / scale} fill={paper} opacity={0.9} />
+      {ticks.map((points, i) => (
+        <Line key={i} points={points} stroke={color} strokeWidth={1 / scale} />
+      ))}
+      {/* Nordhälfte gefüllt, Südhälfte nur umrandet */}
+      <Line points={[0, -r * 0.75, r * 0.18, 0, -r * 0.18, 0]} closed fill={color} stroke={color} strokeWidth={1 / scale} />
+      <Line points={[0, r * 0.75, r * 0.18, 0, -r * 0.18, 0]} closed fill={paper} stroke={color} strokeWidth={1 / scale} />
+      <Text text="N" x={-r} y={-r - r * 0.32 - 2 / scale} width={2 * r} align="center" fontSize={r * 0.32} fontStyle="bold" fill={color} />
+    </Group>
+  )
+}
+
 /** Zeichnet den Plan in Plankoordinaten (cm); Linienbreiten und Schrift bleiben am Bildschirm konstant. */
 export function PlanRenderer({ home, selection, view, width, height, preview, wallsBelow }: PlanRendererProps) {
   const theme = useTheme()
@@ -354,6 +379,8 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         minor={dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}
         major={dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'}
       />
+
+      {home.compass.visible && <CompassRose compass={home.compass} scale={scale} color={theme.palette.text.secondary} paper={theme.palette.background.paper} />}
 
       {shapes}
 

@@ -5,6 +5,8 @@ export type DialogRequest =
   | { kind: 'edit'; ids: string[] }
   /** Neuen Text an dieser Stelle im Plan anlegen. */
   | { kind: 'newLabel'; x: number; y: number }
+  /** Kompass und Lage des Projekts. */
+  | { kind: 'compass' }
 
 interface DialogState {
   request: DialogRequest | null
@@ -18,6 +20,8 @@ export const useDialogStore = create<DialogState>((set) => ({
   open: (request) => set({ request }),
   close: () => set({ request: null }),
 }))
+
+export const openCompassDialog = () => useDialogStore.getState().open({ kind: 'compass' })
 
 export const openItemDialog = (ids: string[]) => ids.length > 0 && useDialogStore.getState().open({ kind: 'edit', ids })
 

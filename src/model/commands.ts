@@ -1,4 +1,4 @@
-import { homeItems, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Room, type Wall } from './home'
+import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Room, type Wall } from './home'
 import { sortLevels } from './levels'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
@@ -24,6 +24,7 @@ export type HomeCommand =
   | { type: 'updateLevel'; change: Change<Level> }
   /** Löscht die Ebene samt ihrer Objekte. */
   | { type: 'deleteLevel'; id: string }
+  | { type: 'updateCompass'; change: Partial<Compass> }
   /** Mehrere Befehle als ein Undo-Schritt. */
   | { type: 'batch'; commands: HomeCommand[] }
 
@@ -105,6 +106,9 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       }
       break
     }
+    case 'updateCompass':
+      Object.assign(home.compass, command.change)
+      break
     case 'batch':
       for (const sub of command.commands) applyCommand(home, sub)
       break

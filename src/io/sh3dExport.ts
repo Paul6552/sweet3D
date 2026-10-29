@@ -143,7 +143,8 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
       ),
     ),
   )
-  const { observer } = home.camera
+  const { observer, time } = home.camera
+  const { compass } = home
   const xml = [
     "<?xml version='1.0'?>",
     `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}'${home.selectedLevel ? ` selectedLevel='${escapeXml(home.selectedLevel)}'` : ''} wallHeight='${home.wallHeight}'>`,
@@ -151,6 +152,16 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
     ...(libraries.length > 0 ? [`  ${element('property', { name: LIBRARIES_PROPERTY, value: JSON.stringify(libraries) })}`] : []),
     ...(Object.keys(textureExtras).length > 0 ? [`  ${element('property', { name: TEXTURE_EXTRAS_PROPERTY, value: JSON.stringify(textureExtras) })}`] : []),
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
+    `  ${element('compass', {
+      x: compass.x,
+      y: compass.y,
+      diameter: compass.diameter,
+      northDirection: compass.northDirection,
+      longitude: compass.longitude,
+      latitude: compass.latitude,
+      timeZone: compass.timeZone,
+      visible: compass.visible ? null : false,
+    })}`,
     `  ${element('observerCamera', {
       attribute: 'observerCamera',
       lens: 'PINHOLE',
@@ -160,9 +171,10 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
       yaw: fromObserverYaw(observer.yaw),
       pitch: fromObserverPitch(observer.pitch),
       fieldOfView: observer.fieldOfView,
+      time,
     })}`,
     // Standard-Luftansicht von Sweet Home 3D; die Desktop-App richtet sie beim Öffnen selbst aus
-    `  ${element('camera', { attribute: 'topCamera', lens: 'PINHOLE', x: 50, y: 1050, z: 1010, yaw: Math.PI, pitch: Math.PI / 4, fieldOfView: (63 * Math.PI) / 180 })}`,
+    `  ${element('camera', { attribute: 'topCamera', lens: 'PINHOLE', x: 50, y: 1050, z: 1010, yaw: Math.PI, pitch: Math.PI / 4, fieldOfView: (63 * Math.PI) / 180, time })}`,
     // Ebenen vor allem, was auf sie verweist; elevationIndex ordnet Ebenen gleicher Höhe
     ...home.levels.map(
       (level, index) =>

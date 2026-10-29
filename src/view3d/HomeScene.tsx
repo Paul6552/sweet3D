@@ -1,8 +1,8 @@
 import type { ThreeEvent } from '@react-three/fiber'
 import { memo, useMemo } from 'react'
-import { Shape, ShapeGeometry } from 'three'
+import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry } from 'three'
 import type { Home, Wall } from '../model/home'
-import { defaultWallHeight, visibleLevels } from '../model/levels'
+import { defaultWallHeight, levelsAbove, visibleLevels } from '../model/levels'
 import { dispatch } from '../store/editorStore'
 import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
@@ -25,6 +25,18 @@ function selectOnClick(event: ThreeEvent<MouseEvent>, id: string, selection: str
   dispatch({ type: 'select', ids })
 }
 
+/**
+ * Ebene für Teile, die nur Schatten werfen: die Schattenkamera der Sonne sieht sie, die Kamera,
+ * die Kontaktschatten (AO) und Mausklicks nicht.
+ */
+export const SHADOW_LAYER = 1
+const SHADOW_ONLY = new Layers()
+SHADOW_ONLY.set(SHADOW_LAYER)
+/** Wird nie gezeichnet, nur in die Schattenkarte; beidseitig, damit auch Böden und Decken Schatten werfen. */
+const SHADOW_MATERIAL = new MeshBasicMaterial({ side: DoubleSide })
+/** Nicht im Foto-Modus: dort würde der Pathtracer sie sichtbar zeichnen. */
+const SHADOW_USER_DATA = { photo: false }
+
 const WALL = '#f1eee8'
 const FLOOR = '#cdb79a'
 const CEILING = '#fafafa'
@@ -38,10 +50,6 @@ function roomGeometry(points: [number, number][]): ShapeGeometry {
   return new ShapeGeometry(new Shape(points.map(([x, y]) => ({ x, y }) as never)))
 }
 
-/**
- * Inhalt der 3D-Ansicht in cm: wie in Sweet Home 3D die gewählte Ebene und alle darunter, jede
- * auf ihrer Höhe. Ohne Ebenen gibt es genau eine Gruppe auf Höhe 0.
- */
 /** Kamerabewegungen ändern nur home.camera; die Szene muss dafür nicht neu gerendert werden. */
 const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
   a.selection === b.selection &&
@@ -54,6 +62,11 @@ const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
   a.home.selectedLevel === b.home.selectedLevel &&
   a.home.wallHeight === b.home.wallHeight
 
+/**
+ * Inhalt der 3D-Ansicht in cm: wie in Sweet Home 3D die gewählte Ebene und alle darunter, jede
+ * auf ihrer Höhe. Ohne Ebenen gibt es genau eine Gruppe auf Höhe 0. Die Ebenen darüber sind
+ * ausgeblendet, werfen aber weiter Schatten, damit die Sonne nicht von oben in die Räume scheint.
+ */
 export const HomeScene = memo(function HomeScene({ home, selection, selectionColor, showCeilings }: HomeSceneProps) {
   return (
     <group>
@@ -65,18 +78,35 @@ export const HomeScene = memo(function HomeScene({ home, selection, selectionCol
             selection={selection}
             selectionColor={selectionColor}
             showCeilings={showCeilings}
+            shadowOnly={false}
           />
+        </group>
+      ))}
+      {levelsAbove(home).map((level) => (
+        <group key={level.id} position-y={level.elevation}>
+          <LevelScene home={home} levelId={level.id} selection={selection} selectionColor={selectionColor} showCeilings={false} shadowOnly />
         </group>
       ))}
     </group>
   )
 }, sameScene)
 
+/** Eigenschaften eines Teils, das nur Schatten wirft. */
+const shadowOnlyProps = { layers: SHADOW_ONLY, material: SHADOW_MATERIAL, userData: SHADOW_USER_DATA, castShadow: true }
+
 /**
  * Eine Ebene. Flächen aus dem Plan (x, y) werden um +90° um die x-Achse gedreht, sodass Plan-y
  * zu three.js-z wird; extrudierte Wände wachsen dabei nach unten, daher liegt ihr Ursprung an der Oberkante.
+ * {@code shadowOnly}: nur Wände, Böden und Decken als Schattenwerfer (für ausgeblendete Ebenen darüber).
  */
-function LevelScene({ home, levelId, selection, selectionColor, showCeilings }: Omit<HomeSceneProps, 'home'> & { home: Home; levelId: string | null }) {
+function LevelScene({
+  home,
+  levelId,
+  selection,
+  selectionColor,
+  showCeilings,
+  shadowOnly,
+}: Omit<HomeSceneProps, 'home'> & { home: Home; levelId: string | null; shadowOnly: boolean }) {
   const levelWalls = useMemo(() => home.walls.filter((w) => w.level === levelId), [home.walls, levelId])
   const levelRooms = useMemo(() => home.rooms.filter((r) => r.level === levelId), [home.rooms, levelId])
   const levelFurniture = useMemo(() => home.furniture.filter((p) => p.level === levelId), [home.furniture, levelId])
@@ -98,34 +128,47 @@ function LevelScene({ home, levelId, selection, selectionColor, showCeilings }: 
             geometry={slice.geometry}
             rotation-x={Math.PI / 2}
             position-y={slice.top}
-            castShadow
-            receiveShadow
-            material={wallMaterials(wall, selection.includes(wall.id) ? selectionColor : null)}
-            onClick={(e) => selectOnClick(e, wall.id, selection)}
+            {...(shadowOnly
+              ? shadowOnlyProps
+              : {
+                  castShadow: true,
+                  receiveShadow: true,
+                  material: wallMaterials(wall, selection.includes(wall.id) ? selectionColor : null),
+                  onClick: (e: ThreeEvent<MouseEvent>) => selectOnClick(e, wall.id, selection),
+                })}
           />
         )),
       )}
 
       {rooms.map(({ room, geometry }) => (
         <group key={room.id}>
-          {room.floorVisible && (
-            <mesh
-              geometry={geometry}
-              rotation-x={Math.PI / 2}
-              position-y={0.5}
-              receiveShadow
-              material={surfaceMaterial(room.floor, FLOOR, selection.includes(room.id) ? selectionColor : null)}
-              onClick={(e) => selectOnClick(e, room.id, selection)}
-            />
+          {shadowOnly ? (
+            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={0.5} {...shadowOnlyProps} />
+          ) : (
+            room.floorVisible && (
+              <mesh
+                geometry={geometry}
+                rotation-x={Math.PI / 2}
+                position-y={0.5}
+                castShadow
+                receiveShadow
+                material={surfaceMaterial(room.floor, FLOOR, selection.includes(room.id) ? selectionColor : null)}
+                onClick={(e) => selectOnClick(e, room.id, selection)}
+              />
+            )
           )}
-          {room.ceilingVisible && showCeilings && (
-            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} material={surfaceMaterial(room.ceiling, CEILING)} />
-          )}
+          {/* Ohne Decke in der Ansicht (Luftansicht) wirft sie trotzdem Schatten, sonst scheint die Sonne in die Räume */}
+          {room.ceilingVisible &&
+            (showCeilings && !shadowOnly ? (
+              <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} castShadow receiveShadow material={surfaceMaterial(room.ceiling, CEILING)} />
+            ) : (
+              <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />
+            ))}
         </group>
       ))}
 
       {levelFurniture
-        .filter((p) => p.visible)
+        .filter((p) => p.visible && !shadowOnly)
         .map((piece) => (
           <PieceModel
             key={piece.id}

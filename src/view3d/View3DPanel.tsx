@@ -17,37 +17,46 @@ import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping } from '@react-three/pos
 import { ToneMappingMode } from 'postprocessing'
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ACESFilmicToneMapping, type Fog, Object3D, PCFShadowMap, Vector3 } from 'three'
+import { ACESFilmicToneMapping, type Color, type Fog, Layers, Object3D, PCFShadowMap, Vector3 } from 'three'
 import type { CameraMode, Home } from '../model/home'
 import { visibleLevels } from '../model/levels'
 import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { Ground, Sky } from './Environment'
-import { HORIZON, SUN_DIRECTION } from './sky'
+import { type Daylight, daylight } from './sky'
+import { sunDirection, sunPosition } from './sun'
+import { SunPopover } from './SunPopover'
+import { CompassHeading, CompassOverlay } from './CompassOverlay'
 import { useEditorContext } from '../editor/EditorContext'
 import { PanelToolbar } from '../editor/PanelFrame'
-import { HomeScene } from './HomeScene'
+import { HomeScene, SHADOW_LAYER } from './HomeScene'
 import { PhotoDialog, type SceneHandle } from './PhotoDialog'
 import { QUALITIES, QUALITY_PROFILES, type QualityProfile, useQualityStore } from './quality'
 import { ThumbnailRecorder } from './ThumbnailRecorder'
 
-function sceneBounds(home: Home): SceneBounds {
+/** {@code allLevels}: auch die ausgeblendeten Ebenen darüber (für den Schattenbereich der Sonne). */
+function sceneBounds(home: Home, allLevels = false): SceneBounds {
   const b = homeBounds(home) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
   // Oberkante der obersten sichtbaren Ebene
-  const top = Math.max(...visibleLevels(home).map((l) => (l ? l.elevation + l.height : home.wallHeight)))
+  const levels = allLevels && home.levels.length > 0 ? home.levels : visibleLevels(home)
+  const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)))
   const center = new Vector3((b.minX + b.maxX) / 2, top / 3, (b.minY + b.maxY) / 2)
   const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top) / 2 + 100
   return { center, radius }
 }
 
+/** Die Schattenkamera sieht auch die Teile, die nur Schatten werfen (ausgeblendete Ebenen darüber). */
+const SHADOW_CAMERA_LAYERS = new Layers()
+SHADOW_CAMERA_LAYERS.enable(SHADOW_LAYER)
+
 /**
  * Tageslicht: das Umgebungslicht kommt vom Himmel (siehe Sky), dazu eine Sonne mit Schatten.
  * Der Schattenbereich umfasst nur das Projekt, damit die Schatten scharf genug sind.
  */
-function Lights({ bounds, profile }: { bounds: SceneBounds; profile: QualityProfile }) {
+function Lights({ bounds, profile, light }: { bounds: SceneBounds; profile: QualityProfile; light: Daylight }) {
   const { center, radius } = bounds
-  const sun = center.clone().addScaledVector(SUN_DIRECTION, radius * 3)
+  const sun = center.clone().addScaledVector(light.direction, radius * 3)
   const extent = radius * 1.05
   // Das Ziel muss in der Szene liegen (nicht als Kind des Lichts), sonst zeigt die Sonne in eine falsche Richtung
   const target = useMemo(() => new Object3D(), [])
@@ -55,14 +64,15 @@ function Lights({ bounds, profile }: { bounds: SceneBounds; profile: QualityProf
     <>
       <primitive object={target} position={center} />
       {/* Nur ein Hauch, falls das Umgebungslicht noch berechnet wird */}
-      <hemisphereLight args={['#e8f1ff', '#8a7f6a', 0.15]} />
+      <hemisphereLight args={['#e8f1ff', '#8a7f6a']} intensity={light.hemisphereIntensity} />
       <directionalLight
         // Neue Schattenkarte, wenn sich die Auflösung ändert
         key={profile.shadowMapSize}
         position={sun}
-        color="#fff3e2"
-        intensity={2.4}
+        color={light.sunColor}
+        intensity={light.sunIntensity}
         castShadow
+        shadow-camera-layers={SHADOW_CAMERA_LAYERS}
         shadow-mapSize={[profile.shadowMapSize, profile.shadowMapSize]}
         shadow-camera-left={-extent}
         shadow-camera-right={extent}
@@ -96,7 +106,7 @@ function Effects({ profile }: { profile: QualityProfile }) {
  * Dunst ab etwas hinter dem Projekt, gemessen von der Kamera: so bleibt das Projekt aus jeder
  * Entfernung klar und nur der Boden zum Horizont hin verschwimmt.
  */
-function Haze({ bounds }: { bounds: SceneBounds }) {
+function Haze({ bounds, color }: { bounds: SceneBounds; color: Color }) {
   const fog = useRef<Fog>(null)
   useFrame(({ camera }) => {
     if (!fog.current) return
@@ -104,7 +114,7 @@ function Haze({ bounds }: { bounds: SceneBounds }) {
     fog.current.near = near
     fog.current.far = near + Math.max(bounds.radius * 20, 60000)
   })
-  return <fog ref={fog} attach="fog" args={[HORIZON, 4000, 60000]} />
+  return <fog ref={fog} attach="fog" args={[color, 4000, 60000]} />
 }
 
 /**
@@ -178,6 +188,7 @@ export function View3DPanel() {
   const setQuality = useQualityStore((s) => s.setQuality)
   const profile = QUALITY_PROFILES[quality]
   const sceneHandle = useRef<SceneHandle | null>(null)
+  const compassRose = useRef<HTMLDivElement>(null)
   const registerScene = useCallback((handle: SceneHandle) => {
     sceneHandle.current = handle
   }, [])
@@ -188,9 +199,9 @@ export function View3DPanel() {
   const wallHeight = home?.wallHeight
   const levels = home?.levels
   const level = home?.selectedLevel
-  const bounds = useMemo(
+  const geometry = useMemo(
     () =>
-      sceneBounds({
+      ({
         walls: walls ?? [],
         furniture: furniture ?? [],
         rooms: rooms ?? [],
@@ -200,9 +211,17 @@ export function View3DPanel() {
         wallHeight: wallHeight ?? 250,
         levels: levels ?? [],
         selectedLevel: level ?? null,
-      } as unknown as Home),
+      }) as unknown as Home,
     [walls, furniture, rooms, wallHeight, levels, level],
   )
+  const bounds = useMemo(() => sceneBounds(geometry), [geometry])
+  const shadowBounds = useMemo(() => sceneBounds(geometry, true), [geometry])
+  // Sonnenstand aus Kompass und Uhrzeit; auf etwa ein halbes Grad gerundet, damit das Umgebungslicht
+  // beim Ziehen am Zeitregler nicht bei jedem Schritt neu berechnet werden muss
+  const compass = home?.compass
+  const time = home?.camera.time
+  const directionKey = compass && time !== undefined ? sunDirection(compass, sunPosition(time, compass.latitude, compass.longitude)).toArray().map((v) => v.toFixed(2)).join(',') : '0,1,0'
+  const light = useMemo(() => daylight(new Vector3(...directionKey.split(',').map(Number)).normalize()), [directionKey])
   if (!home) return null
   const mode = home.camera.mode
 
@@ -252,6 +271,7 @@ export function View3DPanel() {
             </MenuItem>
           ))}
         </Menu>
+        <SunPopover home={home} />
         <Tooltip title={t('photo.title')}>
           <IconButton size="small" onClick={() => setPhotoOpen(true)} aria-label={t('photo.title')}>
             <CameraAlt fontSize="small" />
@@ -273,19 +293,21 @@ export function View3DPanel() {
             gl={{ antialias: true, logarithmicDepthBuffer: true, toneMapping: ACESFilmicToneMapping }}
             onPointerMissed={() => dispatch({ type: 'select', ids: [] })}
           >
-            <color attach="background" args={[HORIZON]} />
-            <Haze bounds={bounds} />
-            <Sky environmentSize={profile.environmentSize} />
-            <Lights bounds={bounds} profile={profile} />
+            <color attach="background" args={[light.horizon]} />
+            <Haze bounds={bounds} color={light.horizon} />
+            <Sky environmentSize={profile.environmentSize} daylight={light} />
+            <Lights bounds={shadowBounds} profile={profile} light={light} />
             <ShadowUpdates />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground />
             <HomeScene home={home} selection={selection} selectionColor={theme.palette.primary.main} showCeilings={mode === 'observer'} />
             <ThumbnailRecorder projectId={projectId} home={home} />
             <SceneRegistry onChange={registerScene} />
+            {home.compass.visible && <CompassHeading target={compassRose} northDirection={home.compass.northDirection} />}
             <Effects profile={profile} />
           </Canvas>
         </WebGLBoundary>
+        {home.compass.visible && <CompassOverlay ref={compassRose} />}
       </Box>
     </Box>
   )

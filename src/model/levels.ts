@@ -57,6 +57,16 @@ export function visibleLevels(home: Home): (Level | null)[] {
   return home.levels.filter((l) => l.viewable && l.elevation <= current.elevation)
 }
 
+/**
+ * Sichtbare Ebenen über der gewählten: in 3D ausgeblendet, damit man von oben hineinsieht,
+ * aber ihre Decken und Wände werfen weiter Schatten.
+ */
+export function levelsAbove(home: Home): Level[] {
+  const current = selectedLevel(home)
+  if (!current) return []
+  return home.levels.filter((l) => l.viewable && l.elevation > current.elevation)
+}
+
 export function sortLevels(levels: Level[]): Level[] {
   return levels.map((level, index) => ({ level, index })).sort((a, b) => a.level.elevation - b.level.elevation || a.index - b.index).map(({ level }) => level)
 }

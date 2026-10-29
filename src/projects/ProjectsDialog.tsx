@@ -11,11 +11,14 @@ import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
+import Radio from '@mui/material/Radio'
+import RadioGroup from '@mui/material/RadioGroup'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
@@ -36,13 +39,14 @@ import {
   type ProjectSummary,
 } from '../storage/projects'
 import { useEditorStore } from '../store/editorStore'
-import { downloadSh3d, importSh3dFile } from './projectFiles'
+import { createExampleProject, downloadSh3d, importSh3dFile, type ImportOutcome } from './projectFiles'
 
 const readSnapshot = async () => {
   const [projects, storage] = await Promise.all([listProjects(), storageEstimate()])
   return { projects, storage }
 }
 
+type Template = 'empty' | 'example'
 type NameDialog = { mode: 'create' } | { mode: 'rename'; project: ProjectSummary }
 
 interface ProjectsDialogProps {
@@ -64,6 +68,7 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
   const projects = snapshot?.projects ?? []
   const [nameDialog, setNameDialog] = useState<NameDialog | null>(null)
   const [name, setName] = useState('')
+  const [template, setTemplate] = useState<Template>('empty')
   const [toDelete, setToDelete] = useState<ProjectSummary | null>(null)
   const [importing, setImporting] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -96,13 +101,26 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
 
   const showNameDialog = (next: NameDialog) => {
     setName(next.mode === 'rename' ? next.project.name : t('projects.defaultName'))
+    setTemplate('empty')
     setNameDialog(next)
+  }
+
+  const templateName = (value: Template) => t(value === 'example' ? 'projects.exampleName' : 'projects.defaultName')
+
+  const changeTemplate = (next: Template) => {
+    // Den Vorschlag mitwechseln, solange der Name nicht selbst geändert wurde
+    if (name === templateName(template)) setName(templateName(next))
+    setTemplate(next)
   }
 
   const submitName = () => {
     if (!nameDialog || !name.trim()) return
     const dialog = nameDialog
     setNameDialog(null)
+    if (dialog.mode === 'create' && template === 'example') {
+      void importWith(() => createExampleProject(name, language), false)
+      return
+    }
     void run(async () => {
       if (dialog.mode === 'create') {
         openProject((await createProject(name)).id)
@@ -144,17 +162,17 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
     }
   }
 
-  const importFile = async (file: File) => {
+  const importWith = async (load: () => Promise<ImportOutcome>, announce = true) => {
     setImporting(true)
-    const outcome = await importSh3dFile(file, language)
+    const outcome = await load()
     setImporting(false)
     if (!outcome.ok) {
       notify(t(`projects.importErrors.${outcome.error}`))
       return
     }
-    const hints = [t('projects.imported', { name: outcome.project.name })]
+    const hints = announce ? [t('projects.imported', { name: outcome.project.name })] : []
     if (outcome.missingModels) hints.push(t('projects.importMissingModels', { count: outcome.missingModels }))
-    notify(hints.join(' '))
+    if (hints.length) notify(hints.join(' '))
     openProject(outcome.project.id)
   }
 
@@ -220,7 +238,7 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'space-between' }}>
           <Stack direction="row" spacing={1}>
-            <Button startIcon={<Add />} onClick={() => showNameDialog({ mode: 'create' })}>
+            <Button startIcon={<Add />} disabled={importing} onClick={() => showNameDialog({ mode: 'create' })}>
               {t('projects.new')}
             </Button>
             <Button startIcon={<UploadFileOutlined />} disabled={importing} onClick={() => fileInput.current?.click()}>
@@ -237,7 +255,7 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
           onChange={(event) => {
             const file = event.target.files?.[0]
             event.target.value = ''
-            if (file) void importFile(file)
+            if (file) void importWith(() => importSh3dFile(file, language))
           }}
         />
       </Dialog>
@@ -261,6 +279,12 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
               onFocus={(e) => e.target.select()}
               slotProps={{ htmlInput: { maxLength: 255 } }}
             />
+            {nameDialog?.mode === 'create' && (
+              <RadioGroup value={template} onChange={(e) => changeTemplate(e.target.value as Template)} aria-label={t('projects.template')}>
+                <FormControlLabel value="empty" control={<Radio size="small" />} label={t('projects.templateEmpty')} />
+                <FormControlLabel value="example" control={<Radio size="small" />} label={t('projects.templateExample')} />
+              </RadioGroup>
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setNameDialog(null)}>{t('projects.cancel')}</Button>

@@ -28,15 +28,28 @@ export type ImportOutcome =
 
 /** Importiert eine .sh3d-Datei als neues Projekt im Browser. */
 export async function importSh3dFile(file: File, language: string): Promise<ImportOutcome> {
+  return importSh3dData(file.arrayBuffer(), projectNameFromFile(file.name), language)
+}
+
+/** Legt ein neues Projekt aus dem mitgelieferten Beispielprojekt an. */
+export async function createExampleProject(name: string, language: string): Promise<ImportOutcome> {
+  const data = fetch('/examples/Beispielprojekt.sh3d').then((response) => {
+    if (!response.ok) throw new Error(`Beispielprojekt nicht gefunden (${response.status})`)
+    return response.arrayBuffer()
+  })
+  return importSh3dData(data, name, language)
+}
+
+async function importSh3dData(source: Promise<ArrayBuffer>, name: string, language: string): Promise<ImportOutcome> {
   try {
     const [data, catalog, textures] = await Promise.all([
-      file.arrayBuffer(),
+      source,
       catalogPieces(language),
       catalogApi.textures(language).catch(() => null),
     ])
     const { home, contents, missingModels } = await importSh3d(new Uint8Array(data), catalog, textures)
     requestPersistentStorage()
-    const project = await createProject(projectNameFromFile(file.name), home, contents)
+    const project = await createProject(name, home, contents)
     return { ok: true, project, missingModels }
   } catch (error) {
     if (error instanceof Sh3dImportError) return { ok: false, error: error.reason }

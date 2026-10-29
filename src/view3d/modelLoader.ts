@@ -25,6 +25,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CONTENT_PREFIX, contentKey, isContentRef } from '../model/contents'
 import { contentUrl, contentUrlsWithPrefix } from '../storage/contents'
 import { type MtlInfo, toPbr } from './materials'
+import { patchIndoorLight } from './indoorLight'
 
 type MaterialCreator = ReturnType<MTLLoader['parse']>
 
@@ -89,16 +90,16 @@ function loadModel(ref: string): Promise<Group> {
         const convert = (m: Material) => {
           let result = converted.get(m)
           if (!result) {
-            result = toPbr(m, info[m.name], (path) => new TextureLoader(manager).load(base + path))
+            result = patchIndoorLight(toPbr(m, info[m.name], (path) => new TextureLoader(manager).load(base + path)))
             result.side = DoubleSide
             converted.set(m, result)
           }
           return result
         }
-        if (!child.material) child.material = new MeshStandardMaterial({ color: 0xcccccc, side: DoubleSide })
+        if (!child.material) child.material = patchIndoorLight(new MeshStandardMaterial({ color: 0xcccccc, side: DoubleSide }))
         else child.material = Array.isArray(child.material) ? child.material.map(convert) : convert(child.material)
         delete child.userData.mtl
-        child.castShadow = true
+        child.castShadow = castsShadow(child.material)
         child.receiveShadow = true
       })
       return mergeByMaterial(object)
@@ -108,6 +109,11 @@ function loadModel(ref: string): Promise<Group> {
     models.set(ref, model)
   }
   return model
+}
+
+/** Glas wirft keinen Schatten, sonst fiele keine Sonne durch die Fenster (die Schattenkarte kennt keine Transparenz). */
+function castsShadow(material: Material | Material[]): boolean {
+  return (Array.isArray(material) ? material : [material]).some((m) => !m.transparent || m.opacity >= 0.9)
 }
 
 /**
@@ -153,7 +159,7 @@ function mergeByMaterial(object: Group): Group {
     // Lässt sich etwas nicht zusammenfügen, bleibt das Modell, wie es ist
     if (!geometry) return object
     const mesh = new Mesh(geometry, material)
-    mesh.castShadow = true
+    mesh.castShadow = castsShadow(material)
     mesh.receiveShadow = true
     merged.push(mesh)
   }

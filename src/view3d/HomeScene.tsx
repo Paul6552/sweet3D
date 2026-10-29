@@ -16,6 +16,10 @@ interface HomeSceneProps {
   selection: string[]
   selectionColor: string
   showCeilings: boolean
+  /** Räume immer hell: nicht gezeichnete Decken und Ebenen darüber werfen keinen Schatten. */
+  brightRooms: boolean
+  /** Höchstzahl der Lichtquellen von Leuchten mit Schatten. */
+  lampShadows: number
 }
 
 function selectOnClick(event: ThreeEvent<MouseEvent>, id: string, selection: string[]) {
@@ -26,7 +30,7 @@ function selectOnClick(event: ThreeEvent<MouseEvent>, id: string, selection: str
 }
 
 /**
- * Ebene für Teile, die nur Schatten werfen: die Schattenkamera der Sonne sieht sie, die Kamera,
+ * Ebene für Teile, die nur Schatten werfen: die Schattenkarten sehen sie (siehe ShadowUpdates), die Kamera,
  * die Kontaktschatten (AO) und Mausklicks nicht.
  */
 export const SHADOW_LAYER = 1
@@ -55,6 +59,8 @@ const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
   a.selection === b.selection &&
   a.selectionColor === b.selectionColor &&
   a.showCeilings === b.showCeilings &&
+  a.brightRooms === b.brightRooms &&
+  a.lampShadows === b.lampShadows &&
   a.home.walls === b.home.walls &&
   a.home.rooms === b.home.rooms &&
   a.home.furniture === b.home.furniture &&
@@ -67,29 +73,46 @@ const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
  * auf ihrer Höhe. Ohne Ebenen gibt es genau eine Gruppe auf Höhe 0. Die Ebenen darüber sind
  * ausgeblendet, werfen aber weiter Schatten, damit die Sonne nicht von oben in die Räume scheint.
  */
-export const HomeScene = memo(function HomeScene({ home, selection, selectionColor, showCeilings }: HomeSceneProps) {
+export const HomeScene = memo(function HomeScene({ home, selection, selectionColor, showCeilings, brightRooms, lampShadows }: HomeSceneProps) {
+  const shadowLamps = useMemo(() => lampsWithShadows(home, lampShadows), [home, lampShadows])
+  const sceneProps = { home, selection, selectionColor, brightRooms, lampShadows, shadowLamps }
   return (
     <group>
       {visibleLevels(home).map((level) => (
         <group key={level?.id ?? 'home'} position-y={level?.elevation ?? 0}>
-          <LevelScene
-            home={home}
-            levelId={level?.id ?? null}
-            selection={selection}
-            selectionColor={selectionColor}
-            showCeilings={showCeilings}
-            shadowOnly={false}
-          />
+          <LevelScene {...sceneProps} levelId={level?.id ?? null} showCeilings={showCeilings} shadowOnly={false} />
         </group>
       ))}
-      {levelsAbove(home).map((level) => (
-        <group key={level.id} position-y={level.elevation}>
-          <LevelScene home={home} levelId={level.id} selection={selection} selectionColor={selectionColor} showCeilings={false} shadowOnly />
-        </group>
-      ))}
+      {!brightRooms &&
+        levelsAbove(home).map((level) => (
+          <group key={level.id} position-y={level.elevation}>
+            <LevelScene {...sceneProps} levelId={level.id} showCeilings={false} shadowOnly />
+          </group>
+        ))}
     </group>
   )
 }, sameScene)
+
+/**
+ * Leuchten, deren Licht Schatten wirft, damit es im Raum bleibt: zuerst die der gewählten Ebene,
+ * dann die hellsten, bis {@code budget} Lichtquellen erreicht sind. Hängt nicht von der Kamera ab,
+ * sonst müssten beim Umsehen ständig alle Shader neu übersetzt werden.
+ */
+function lampsWithShadows(home: Home, budget: number): Set<string> {
+  const visible = new Set(visibleLevels(home).map((l) => l?.id ?? null))
+  const lamps = home.furniture
+    .filter((p) => p.visible && p.light && p.light.power > 0 && visible.has(p.level))
+    .sort((a, b) => Number(b.level === home.selectedLevel) - Number(a.level === home.selectedLevel) || b.light!.power - a.light!.power)
+  const result = new Set<string>()
+  let sources = 0
+  for (const lamp of lamps) {
+    const count = lamp.light!.sources.length
+    if (sources + count > budget) continue
+    sources += count
+    result.add(lamp.id)
+  }
+  return result
+}
 
 /** Eigenschaften eines Teils, das nur Schatten wirft. */
 const shadowOnlyProps = { layers: SHADOW_ONLY, material: SHADOW_MATERIAL, userData: SHADOW_USER_DATA, castShadow: true }
@@ -105,8 +128,10 @@ function LevelScene({
   selection,
   selectionColor,
   showCeilings,
+  brightRooms,
+  shadowLamps,
   shadowOnly,
-}: Omit<HomeSceneProps, 'home'> & { home: Home; levelId: string | null; shadowOnly: boolean }) {
+}: HomeSceneProps & { levelId: string | null; shadowOnly: boolean; shadowLamps: Set<string> }) {
   const levelWalls = useMemo(() => home.walls.filter((w) => w.level === levelId), [home.walls, levelId])
   const levelRooms = useMemo(() => home.rooms.filter((r) => r.level === levelId), [home.rooms, levelId])
   const levelFurniture = useMemo(() => home.furniture.filter((p) => p.level === levelId), [home.furniture, levelId])
@@ -162,7 +187,7 @@ function LevelScene({
             (showCeilings && !shadowOnly ? (
               <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} castShadow receiveShadow material={surfaceMaterial(room.ceiling, CEILING)} />
             ) : (
-              <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />
+              !brightRooms && <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />
             ))}
         </group>
       ))}
@@ -175,6 +200,7 @@ function LevelScene({
             piece={piece}
             selected={selection.includes(piece.id)}
             selectionColor={selectionColor}
+            lightShadows={shadowLamps.has(piece.id)}
             onSelect={(e, id) => selectOnClick(e, id, selection)}
           />
         ))}

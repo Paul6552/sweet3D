@@ -17,7 +17,7 @@ import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping } from '@react-three/pos
 import { ToneMappingMode } from 'postprocessing'
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ACESFilmicToneMapping, type Color, type Fog, Layers, Object3D, PCFShadowMap, Vector3 } from 'three'
+import { ACESFilmicToneMapping, type Color, type Fog, Object3D, PCFShadowMap, Vector3 } from 'three'
 import type { CameraMode, Home } from '../model/home'
 import { visibleLevels } from '../model/levels'
 import { homeBounds } from '../plan/hitTest'
@@ -34,6 +34,8 @@ import { HomeScene, SHADOW_LAYER } from './HomeScene'
 import { PhotoDialog, type SceneHandle } from './PhotoDialog'
 import { QUALITIES, QUALITY_PROFILES, type QualityProfile, useQualityStore } from './quality'
 import { ThumbnailRecorder } from './ThumbnailRecorder'
+import { useBrightRoomsStore } from './brightRooms'
+import { IndoorLighting } from './indoorLight'
 
 /** {@code allLevels}: auch die ausgeblendeten Ebenen darüber (für den Schattenbereich der Sonne). */
 function sceneBounds(home: Home, allLevels = false): SceneBounds {
@@ -45,10 +47,6 @@ function sceneBounds(home: Home, allLevels = false): SceneBounds {
   const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top) / 2 + 100
   return { center, radius }
 }
-
-/** Die Schattenkamera sieht auch die Teile, die nur Schatten werfen (ausgeblendete Ebenen darüber). */
-const SHADOW_CAMERA_LAYERS = new Layers()
-SHADOW_CAMERA_LAYERS.enable(SHADOW_LAYER)
 
 /**
  * Tageslicht: das Umgebungslicht kommt vom Himmel (siehe Sky), dazu eine Sonne mit Schatten.
@@ -72,7 +70,6 @@ function Lights({ bounds, profile, light }: { bounds: SceneBounds; profile: Qual
         color={light.sunColor}
         intensity={light.sunIntensity}
         castShadow
-        shadow-camera-layers={SHADOW_CAMERA_LAYERS}
         shadow-mapSize={[profile.shadowMapSize, profile.shadowMapSize]}
         shadow-camera-left={-extent}
         shadow-camera-right={extent}
@@ -129,7 +126,20 @@ function ShadowUpdates() {
     const { shadowMap } = get().gl
     shadowMap.autoUpdate = false
     shadowMap.needsUpdate = true
+    // three.js wählt die Schattenwerfer nach den Ebenen der Hauptkamera, nicht der Schattenkamera:
+    // nur für die Schattenkarten auch die Teile zeigen, die nur Schatten werfen
+    const render = shadowMap.render
+    shadowMap.render = function (lights, scene, camera) {
+      const mask = camera.layers.mask
+      camera.layers.enable(SHADOW_LAYER)
+      try {
+        render.call(this, lights, scene, camera)
+      } finally {
+        camera.layers.mask = mask
+      }
+    }
     return () => {
+      shadowMap.render = render
       shadowMap.autoUpdate = true
     }
   }, [get])
@@ -187,6 +197,7 @@ export function View3DPanel() {
   const quality = useQualityStore((s) => s.quality)
   const setQuality = useQualityStore((s) => s.setQuality)
   const profile = QUALITY_PROFILES[quality]
+  const brightRooms = useBrightRoomsStore((s) => s.brightRooms)
   const sceneHandle = useRef<SceneHandle | null>(null)
   const compassRose = useRef<HTMLDivElement>(null)
   const registerScene = useCallback((handle: SceneHandle) => {
@@ -298,9 +309,17 @@ export function View3DPanel() {
             <Sky environmentSize={profile.environmentSize} daylight={light} />
             <Lights bounds={shadowBounds} profile={profile} light={light} />
             <ShadowUpdates />
+            <IndoorLighting home={geometry} light={light} bright={brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground />
-            <HomeScene home={home} selection={selection} selectionColor={theme.palette.primary.main} showCeilings={mode === 'observer'} />
+            <HomeScene
+              home={home}
+              selection={selection}
+              selectionColor={theme.palette.primary.main}
+              showCeilings={mode === 'observer'}
+              brightRooms={brightRooms}
+              lampShadows={profile.lampShadows}
+            />
             <ThumbnailRecorder projectId={projectId} home={home} />
             <SceneRegistry onChange={registerScene} />
             {home.compass.visible && <CompassHeading target={compassRose} northDirection={home.compass.northDirection} />}

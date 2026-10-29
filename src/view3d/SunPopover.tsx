@@ -2,6 +2,8 @@ import Explore from '@mui/icons-material/Explore'
 import WbSunny from '@mui/icons-material/WbSunny'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Checkbox from '@mui/material/Checkbox'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import IconButton from '@mui/material/IconButton'
 import Popover from '@mui/material/Popover'
 import Slider from '@mui/material/Slider'
@@ -13,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { openCompassDialog } from '../dialogs/dialogStore'
 import type { Home } from '../model/home'
 import { dispatch } from '../store/editorStore'
+import { useBrightRoomsStore } from './brightRooms'
 import { compassPoint, fromZoned, sunPosition, sunriseSunset, toZoned } from './sun'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -22,6 +25,8 @@ const clock = (minutes: number) => `${pad(Math.floor(minutes / 60) % 24)}:${pad(
 export function SunPopover({ home }: { home: Home }) {
   const { t } = useTranslation()
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const brightRooms = useBrightRoomsStore((s) => s.brightRooms)
+  const setBrightRooms = useBrightRoomsStore((s) => s.setBrightRooms)
   const { compass } = home
   const { time } = home.camera
   const zoned = toZoned(time, compass.timeZone)
@@ -81,6 +86,10 @@ export function SunPopover({ home }: { home: Home }) {
             {t('sun.riseSet', { sunrise: clock(toZoned(days.sunrise, compass.timeZone).minutes), sunset: clock(toZoned(days.sunset, compass.timeZone).minutes) })}
           </Typography>
         )}
+        <FormControlLabel
+          control={<Checkbox size="small" checked={brightRooms} onChange={(e) => setBrightRooms(e.target.checked)} />}
+          label={<Typography variant="body2">{t('sun.brightRooms')}</Typography>}
+        />
         <Button
           size="small"
           startIcon={<Explore />}

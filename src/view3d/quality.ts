@@ -14,13 +14,15 @@ export interface QualityProfile {
   bloom: boolean
   /** Kantenlänge der Würfelseiten für das Umgebungslicht aus dem Himmel. */
   environmentSize: number
+  /** Lichtquellen von Leuchten mit Schatten (jede braucht eine eigene Schattenkarte und Textureinheit). */
+  lampShadows: number
 }
 
 export const QUALITY_PROFILES: Record<Quality, QualityProfile> = {
-  low: { dpr: [1, 1], shadowMapSize: 1024, ao: false, aoHalfRes: true, bloom: false, environmentSize: 128 },
-  medium: { dpr: [1, 1.5], shadowMapSize: 2048, ao: true, aoHalfRes: true, bloom: false, environmentSize: 256 },
-  high: { dpr: [1, 2], shadowMapSize: 4096, ao: true, aoHalfRes: false, bloom: true, environmentSize: 256 },
-  ultra: { dpr: [1, 2], shadowMapSize: 8192, ao: true, aoHalfRes: false, bloom: true, environmentSize: 512 },
+  low: { dpr: [1, 1], shadowMapSize: 1024, ao: false, aoHalfRes: true, bloom: false, environmentSize: 128, lampShadows: 0 },
+  medium: { dpr: [1, 1.5], shadowMapSize: 2048, ao: true, aoHalfRes: true, bloom: false, environmentSize: 256, lampShadows: 2 },
+  high: { dpr: [1, 2], shadowMapSize: 4096, ao: true, aoHalfRes: false, bloom: true, environmentSize: 256, lampShadows: 4 },
+  ultra: { dpr: [1, 2], shadowMapSize: 8192, ao: true, aoHalfRes: false, bloom: true, environmentSize: 512, lampShadows: 6 },
 }
 
 const KEY = 'sweet3d.quality'

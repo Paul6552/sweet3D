@@ -207,6 +207,7 @@ export const de = {
     belowHorizon: 'Sonne unter dem Horizont',
     riseSet: 'Aufgang {{sunrise}} · Untergang {{sunset}}',
     compass: 'Kompass und Ort …',
+    brightRooms: 'Räume immer hell (zum Einrichten)',
     rose: { N: 'N', E: 'O', S: 'S', W: 'W' },
     points: {
       N: 'Norden', NNE: 'Nordnordosten', NE: 'Nordosten', ENE: 'Ostnordosten', E: 'Osten', ESE: 'Ostsüdosten', SE: 'Südosten', SSE: 'Südsüdosten',

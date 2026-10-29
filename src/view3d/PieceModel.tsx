@@ -4,6 +4,7 @@ import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Matrix4, Mesh, Vec
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { argbToCss } from '../model/colors'
 import type { HomePiece, LightInfo } from '../model/home'
+import { CANDELA_PER_POWER } from './indoorLight'
 import { surfaceMaterial } from './materials'
 import { loadNormalizedModel } from './modelLoader'
 
@@ -11,6 +12,8 @@ interface PieceModelProps {
   piece: HomePiece
   selected: boolean
   selectionColor: string
+  /** Die Lichtquellen der Leuchte werfen Schatten (nur für eine begrenzte Zahl von Leuchten). */
+  lightShadows: boolean
   onSelect: (event: ThreeEvent<MouseEvent>, id: string) => void
 }
 
@@ -18,7 +21,7 @@ interface PieceModelProps {
  * Möbel in 3D. Plan (x, y) entspricht three.js (x, z), die Höhe ist y; der Drehwinkel im Plan
  * läuft im Uhrzeigersinn, daher wird um -angle um die y-Achse gedreht.
  */
-export function PieceModel({ piece, selected, selectionColor, onSelect }: PieceModelProps) {
+export function PieceModel({ piece, selected, selectionColor, lightShadows, onSelect }: PieceModelProps) {
   const [loaded, setLoaded] = useState<{ key: string; object: Object3D | null } | null>(null)
   const { model, modelRotation, width, height, depth } = piece
   const key = JSON.stringify([model, modelRotation, width, height, depth])
@@ -43,6 +46,14 @@ export function PieceModel({ piece, selected, selectionColor, onSelect }: PieceM
     if (object) applyAppearance(object, piece.color, piece.texture ?? null)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- appearance fasst Farbe und Textur zusammen
   }, [object, appearance])
+  // Der Schirm einer Leuchte würde ihr eigenes Licht abschatten
+  const isLight = !!piece.light
+  useEffect(() => {
+    if (!isLight) return
+    object?.traverse((child) => {
+      if (child instanceof Mesh) child.castShadow = false
+    })
+  }, [object, isLight])
   return (
     <group
       position={[piece.x, piece.elevation, piece.y]}
@@ -58,7 +69,7 @@ export function PieceModel({ piece, selected, selectionColor, onSelect }: PieceM
           <meshStandardMaterial color={failed ? '#e0702b' : '#b0b0b0'} transparent opacity={failed ? 0.7 : 0.5} />
         </mesh>
       )}
-      {piece.light && <PieceLights light={piece.light} width={width} depth={depth} height={height} />}
+      {piece.light && <PieceLights light={piece.light} width={width} depth={depth} height={height} shadows={lightShadows} />}
       {selected && (
         <lineSegments position-y={height / 2} raycast={() => null}>
           <edgesGeometry args={[new BoxGeometry(width + 2, height + 2, depth + 2)]} />
@@ -70,13 +81,10 @@ export function PieceModel({ piece, selected, selectionColor, onSelect }: PieceM
 }
 
 /**
- * Lichtstärke in Candela je Leistungseinheit; die Szene ist in cm, daher groß (bei 2 m Abstand
- * ergibt Leistung 0,5 etwa ein Drittel der Sonne).
+ * Lichtquellen einer Leuchte wie in Sweet Home 3D. Mit Schatten bleibt ihr Licht im Raum; die
+ * Schattenkarten werden nur bei Änderungen neu gezeichnet (siehe ShadowUpdates).
  */
-const CANDELA_PER_POWER = 80000
-
-/** Lichtquellen einer Leuchte wie in Sweet Home 3D, ohne Schatten (die kosten je Licht sechs Durchgänge). */
-function PieceLights({ light, width, depth, height }: { light: LightInfo; width: number; depth: number; height: number }) {
+function PieceLights({ light, width, depth, height, shadows }: { light: LightInfo; width: number; depth: number; height: number; shadows: boolean }) {
   return (
     <>
       {light.sources.map((source, i) => (
@@ -86,6 +94,12 @@ function PieceLights({ light, width, depth, height }: { light: LightInfo; width:
           color={argbToCss(source.color)}
           intensity={(light.power * CANDELA_PER_POWER) / light.sources.length}
           decay={2}
+          castShadow={shadows}
+          shadow-mapSize={[512, 512]}
+          shadow-camera-near={5}
+          shadow-camera-far={3000}
+          shadow-bias={-0.0005}
+          shadow-normalBias={0.5}
         />
       ))}
     </>

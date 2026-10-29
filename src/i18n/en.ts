@@ -209,6 +209,7 @@ export const en: Resources = {
     belowHorizon: 'Sun below the horizon',
     riseSet: 'Sunrise {{sunrise}} · Sunset {{sunset}}',
     compass: 'Compass and location …',
+    brightRooms: 'Rooms always bright (for furnishing)',
     rose: { N: 'N', E: 'E', S: 'S', W: 'W' },
     points: {
       N: 'north', NNE: 'north-northeast', NE: 'northeast', ENE: 'east-northeast', E: 'east', ESE: 'east-southeast', SE: 'southeast', SSE: 'south-southeast',

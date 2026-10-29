@@ -15,6 +15,7 @@ import { argbToCss } from '../model/colors'
 import { contentKey, isContentRef } from '../model/contents'
 import type { Surface, TextureRef } from '../model/home'
 import { contentUrl } from '../storage/contents'
+import { patchIndoorLight } from './indoorLight'
 
 /** three.js begrenzt auf das, was die Grafikkarte kann; Texturen bleiben so auch unter flachem Blickwinkel scharf. */
 export const MAX_ANISOTROPY = 16
@@ -66,7 +67,7 @@ export function surfaceMaterial(surface: Surface | null | undefined, fallback: s
   let material = materials.get(key)
   if (!material) {
     const maps = texture?.maps
-    material = new MeshStandardMaterial({
+    material = patchIndoorLight(new MeshStandardMaterial({
       color,
       side: DoubleSide,
       // Putz, Holz und Stoff glänzen kaum; Karten aus PBR-Texturen übersteuern das
@@ -77,7 +78,7 @@ export function surfaceMaterial(surface: Surface | null | undefined, fallback: s
       aoMap: texture && maps?.ao ? surfaceTexture(maps.ao, texture, false) : null,
       metalnessMap: texture && maps?.metalness ? surfaceTexture(maps.metalness, texture, false) : null,
       metalness: maps?.metalness ? 1 : 0,
-    })
+    }))
     materials.set(key, material)
   }
   return material

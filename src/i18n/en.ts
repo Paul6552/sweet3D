@@ -79,6 +79,10 @@ export const en: Resources = {
     builtin: 'Default catalog',
   },
   libraries: {
+    bundled: 'Bundled catalogs',
+    own: 'Installed catalogs',
+    add: 'Add',
+    installed: 'Installed',
     title: 'Catalogs',
     manage: 'Manage and import catalogs',
     import: 'Choose files …',

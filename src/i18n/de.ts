@@ -77,6 +77,10 @@ export const de = {
     builtin: 'Standardkatalog',
   },
   libraries: {
+    bundled: 'Mitgelieferte Kataloge',
+    own: 'Installierte Kataloge',
+    add: 'Hinzufügen',
+    installed: 'Installiert',
     title: 'Kataloge',
     manage: 'Kataloge verwalten und importieren',
     import: 'Dateien wählen …',

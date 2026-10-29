@@ -139,6 +139,8 @@ export function toPbr(source: Material, info: MtlInfo | undefined, loadMap: (pat
     roughnessMap: map('map_pr'),
     metalnessMap: map('map_pm'),
     aoMap: map('map_ao'),
+    // Blätter usw. (Erweiterung von build-packs.mjs): durchsichtige Teile des Bilds abschneiden
+    alphaTest: number('alphatest') ?? 0,
   }
   for (const texture of [parameters.map, parameters.normalMap, parameters.bumpMap, parameters.alphaMap, parameters.emissiveMap]) {
     if (texture) texture.anisotropy = MAX_ANISOTROPY

@@ -6,6 +6,10 @@ dist
 # Aus vendor/sh3d erzeugt (npm run catalog)
 public/catalog/
 
+# Mitgelieferte Zusatzkataloge (npm run packs) und ihre heruntergeladenen Quellen
+public/packs/
+vendor/packs-cache/
+
 # Logs
 *.log
 

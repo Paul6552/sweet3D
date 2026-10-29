@@ -6,7 +6,7 @@
 // DefaultTexturesCatalog: Flügel und Wandlage relativ zu Breite/Tiefe, Winkel in Radiant.
 
 import type { CatalogPiece, CatalogTexture } from '../api/catalog'
-import type { LightInfo } from '../model/home'
+import type { LightInfo, TextureMaps } from '../model/home'
 
 export type Properties = Map<string, string>
 
@@ -175,6 +175,12 @@ export function readTextureEntries(props: Properties, resolve: ResolvePath, libr
   for (let i = 1; props.has(`id#${i}`) || props.has(`name#${i}`); i++) {
     const image = resolve(props.get(`image#${i}`))
     if (!image) continue
+    // Erweiterung von Sweet3D für PBR-Texturen; Sweet Home 3D verwendet nur image#i
+    const maps: TextureMaps = {}
+    for (const [kind, key] of [['normal', 'normalMap'], ['roughness', 'roughnessMap'], ['ao', 'aoMap'], ['metalness', 'metalnessMap']] as const) {
+      const map = resolve(props.get(`${key}#${i}`))
+      if (map) maps[kind] = map
+    }
     entries.push({
       category: props.get(`category#${i}`) ?? '',
       texture: {
@@ -182,9 +188,10 @@ export function readTextureEntries(props: Properties, resolve: ResolvePath, libr
         name: props.get(`name#${i}`) ?? '',
         creator: props.get(`creator#${i}`) ?? null,
         image,
-        icon: image,
+        icon: resolve(props.get(`icon#${i}`)) ?? image,
         width: float(props.get(`width#${i}`) ?? '100') || 100,
         height: float(props.get(`height#${i}`) ?? '100') || 100,
+        ...(Object.keys(maps).length > 0 && { maps }),
         ...(libraryId && { libraryId }),
       },
     })

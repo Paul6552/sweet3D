@@ -1,0 +1,294 @@
+{
+  "$comment": "Mitgelieferte Zusatzkataloge, erzeugt von scripts/build-packs.mjs nach public/packs. Poly Haven: alle Inhalte CC0. Kategorien in Klammern: Poly-Haven-Kategorie → Katalogkategorie (de/en).",
+  "resolution": "1k",
+  "polyHaven": {
+    "models": [
+      {
+        "id": "polyhaven-furniture",
+        "name": {
+          "en": "Poly Haven – Furniture",
+          "de": "Poly Haven – Möbel"
+        },
+        "description": {
+          "en": "Photorealistic CC0 furniture scanned and modelled by Poly Haven",
+          "de": "Fotorealistische Möbel von Poly Haven (CC0)"
+        },
+        "maxPolycount": 150000,
+        "max": 60,
+        "categories": {
+          "seating": {
+            "en": "Seating",
+            "de": "Sitzmöbel"
+          },
+          "table": {
+            "en": "Tables",
+            "de": "Tische"
+          },
+          "shelves": {
+            "en": "Shelves",
+            "de": "Regale"
+          },
+          "bed": {
+            "en": "Beds",
+            "de": "Betten"
+          },
+          "furniture": {
+            "en": "Furniture",
+            "de": "Möbel"
+          }
+        },
+        "exclude": [
+          "industrial",
+          "weapons",
+          "firearms",
+          "food",
+          "tools"
+        ]
+      },
+      {
+        "id": "polyhaven-decor",
+        "name": {
+          "en": "Poly Haven – Lights & decoration",
+          "de": "Poly Haven – Leuchten & Deko"
+        },
+        "description": {
+          "en": "Lamps, vases and decoration (CC0)",
+          "de": "Leuchten, Vasen und Dekoration (CC0)"
+        },
+        "maxPolycount": 120000,
+        "max": 40,
+        "categories": {
+          "lighting": {
+            "en": "Lights",
+            "de": "Leuchten",
+            "light": true
+          },
+          "vases": {
+            "en": "Vases",
+            "de": "Vasen"
+          },
+          "wall decoration": {
+            "en": "Wall decoration",
+            "de": "Wanddekoration"
+          },
+          "dishes": {
+            "en": "Dishes",
+            "de": "Geschirr"
+          },
+          "books": {
+            "en": "Books",
+            "de": "Bücher"
+          },
+          "decorative": {
+            "en": "Decoration",
+            "de": "Dekoration"
+          }
+        },
+        "exclude": [
+          "industrial",
+          "weapons",
+          "firearms",
+          "food",
+          "tools"
+        ]
+      },
+      {
+        "id": "polyhaven-plants",
+        "name": {
+          "en": "Poly Haven – Plants & trees",
+          "de": "Poly Haven – Pflanzen & Bäume"
+        },
+        "description": {
+          "en": "Realistic plants, flowers and trees (CC0)",
+          "de": "Realistische Pflanzen, Blumen und Bäume (CC0)"
+        },
+        "maxPolycount": 200000,
+        "max": 24,
+        "categories": {
+          "potted plants": {
+            "en": "Potted plants",
+            "de": "Topfpflanzen"
+          },
+          "trees": {
+            "en": "Trees",
+            "de": "Bäume"
+          },
+          "flowers": {
+            "en": "Flowers",
+            "de": "Blumen"
+          },
+          "plants": {
+            "en": "Plants",
+            "de": "Pflanzen"
+          }
+        },
+        "exclude": [
+          "industrial",
+          "weapons",
+          "firearms",
+          "food",
+          "tools"
+        ]
+      }
+    ],
+    "textures": [
+      {
+        "id": "polyhaven-textures-floors",
+        "name": {
+          "en": "Poly Haven – Wood & floors",
+          "de": "Poly Haven – Holz & Böden"
+        },
+        "description": {
+          "en": "Photo-scanned PBR materials with normal, roughness and occlusion maps (CC0)",
+          "de": "Fotogescannte PBR-Materialien mit Normalen-, Rauheits- und AO-Karten (CC0)"
+        },
+        "categories": {
+          "wood": {
+            "en": "Wood",
+            "de": "Holz",
+            "max": 12
+          },
+          "floor": {
+            "en": "Floors",
+            "de": "Böden",
+            "max": 10
+          }
+        },
+        "exclude": [
+          "aerial"
+        ]
+      },
+      {
+        "id": "polyhaven-textures-tiles",
+        "name": {
+          "en": "Poly Haven – Tiles & stone",
+          "de": "Poly Haven – Fliesen & Stein"
+        },
+        "description": {
+          "en": "Photo-scanned PBR materials with normal, roughness and occlusion maps (CC0)",
+          "de": "Fotogescannte PBR-Materialien mit Normalen-, Rauheits- und AO-Karten (CC0)"
+        },
+        "categories": {
+          "tiles": {
+            "en": "Tiles",
+            "de": "Fliesen",
+            "max": 8
+          },
+          "rock": {
+            "en": "Stone",
+            "de": "Stein",
+            "max": 4
+          },
+          "cobblestone": {
+            "en": "Paving",
+            "de": "Pflaster",
+            "max": 5
+          },
+          "gravel": {
+            "en": "Ground",
+            "de": "Gelände",
+            "max": 4
+          }
+        },
+        "exclude": [
+          "aerial"
+        ]
+      },
+      {
+        "id": "polyhaven-textures-walls",
+        "name": {
+          "en": "Poly Haven – Brick, plaster & concrete",
+          "de": "Poly Haven – Ziegel, Putz & Beton"
+        },
+        "description": {
+          "en": "Photo-scanned PBR materials with normal, roughness and occlusion maps (CC0)",
+          "de": "Fotogescannte PBR-Materialien mit Normalen-, Rauheits- und AO-Karten (CC0)"
+        },
+        "categories": {
+          "brick": {
+            "en": "Brick",
+            "de": "Ziegel",
+            "max": 8
+          },
+          "plaster": {
+            "en": "Plaster",
+            "de": "Putz",
+            "max": 8
+          },
+          "concrete": {
+            "en": "Concrete",
+            "de": "Beton",
+            "max": 6
+          }
+        },
+        "exclude": [
+          "aerial"
+        ]
+      },
+      {
+        "id": "polyhaven-textures-fabric",
+        "name": {
+          "en": "Poly Haven – Fabric & leather",
+          "de": "Poly Haven – Stoff & Leder"
+        },
+        "description": {
+          "en": "Photo-scanned PBR materials with normal, roughness and occlusion maps (CC0)",
+          "de": "Fotogescannte PBR-Materialien mit Normalen-, Rauheits- und AO-Karten (CC0)"
+        },
+        "categories": {
+          "fabric": {
+            "en": "Fabric",
+            "de": "Stoff",
+            "max": 8
+          },
+          "leather": {
+            "en": "Fabric",
+            "de": "Stoff",
+            "max": 2
+          }
+        },
+        "exclude": [
+          "aerial"
+        ]
+      },
+      {
+        "id": "polyhaven-textures-roof",
+        "name": {
+          "en": "Poly Haven – Roofing & metal",
+          "de": "Poly Haven – Dach & Metall"
+        },
+        "description": {
+          "en": "Photo-scanned PBR materials with normal, roughness and occlusion maps (CC0)",
+          "de": "Fotogescannte PBR-Materialien mit Normalen-, Rauheits- und AO-Karten (CC0)"
+        },
+        "categories": {
+          "roofing": {
+            "en": "Roofing",
+            "de": "Dach",
+            "max": 5
+          },
+          "metal": {
+            "en": "Metal",
+            "de": "Metall",
+            "max": 4
+          }
+        },
+        "exclude": [
+          "aerial"
+        ]
+      }
+    ]
+  },
+  "sh3d": [
+    {
+      "id": "sh3d-trees",
+      "url": "https://sourceforge.net/projects/sweethome3d/files/SweetHome3D-models/3DModels-1.9.3/3DModels-Trees-1.9.3.zip/download",
+      "license": "Free Art License / CC-BY (siehe Bibliothek)"
+    },
+    {
+      "id": "sh3d-blendswap-cc0",
+      "url": "https://sourceforge.net/projects/sweethome3d/files/SweetHome3D-models/3DModels-1.9.3/3DModels-BlendSwap-CC-0-1.9.3.zip/download",
+      "license": "CC0"
+    }
+  ]
+}

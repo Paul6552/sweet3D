@@ -15,7 +15,9 @@ import ListItem from '@mui/material/ListItem'
 import ListItemText from '@mui/material/ListItemText'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { useState } from 'react'
+import AddOutlined from '@mui/icons-material/AddOutlined'
+import CheckOutlined from '@mui/icons-material/CheckOutlined'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNotify } from '../editor/useNotify'
 import { isQuotaError, requestPersistentStorage } from '../storage/projects'
@@ -30,6 +32,32 @@ function formatSize(bytes: number): string {
   return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} kB`
 }
 
+/** Mitgelieferter Katalog aus public/packs/index.json (erzeugt von scripts/build-packs.mjs). */
+interface BundledPack {
+  id: string
+  file: string
+  /** Dateiname der Originalbibliothek, aus dem der Import die Id ableitet. */
+  importName?: string
+  name: Record<string, string>
+  description: Record<string, string>
+  size: number
+  furniture: number
+  textures: number
+  provider: string
+  license: string
+}
+
+/** Liste der mitgelieferten Kataloge; leer, wenn sie nicht erzeugt wurden. */
+async function loadPacks(): Promise<BundledPack[]> {
+  try {
+    const response = await fetch(`${import.meta.env.BASE_URL}packs/index.json`)
+    if (!response.ok || !response.headers.get('content-type')?.includes('json')) return []
+    return (await response.json()) as BundledPack[]
+  } catch {
+    return []
+  }
+}
+
 /** Anzahl der Möbel bzw. Texturen in der Grundsprache der Bibliothek. */
 function itemCount(categories: { pieces?: unknown[]; textures?: unknown[] }[]): number {
   return categories.reduce((sum, c) => sum + (c.pieces?.length ?? c.textures?.length ?? 0), 0)
@@ -37,13 +65,21 @@ function itemCount(categories: { pieces?: unknown[]; textures?: unknown[] }[]): 
 
 /** Importierte Möbel- und Texturbibliotheken verwalten: importieren, Angaben ansehen, löschen. */
 export function LibrariesDialog({ onClose }: { onClose: () => void }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const notify = useNotify()
   const libraries = useCatalogStore((s) => s.libraries)
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ library: StoredLibrary; projects: string[] } | null>(null)
+  const [packs, setPacks] = useState<BundledPack[]>([])
+  const [adding, setAdding] = useState<string | null>(null)
+  const language = i18n.resolvedLanguage === 'de' ? 'de' : 'en'
+  const installed = new Set(libraries.map((l) => l.id))
+
+  useEffect(() => {
+    void loadPacks().then(setPacks)
+  }, [])
 
   const importFiles = async (files: File[]) => {
     if (files.length === 0) return
@@ -67,6 +103,21 @@ export function LibrariesDialog({ onClose }: { onClose: () => void }) {
       await librariesChanged()
     } finally {
       setBusy(false)
+    }
+  }
+
+  const addPack = async (pack: BundledPack) => {
+    setAdding(pack.id)
+    setError(null)
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}packs/${pack.file}`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      await importFiles([new File([await response.blob()], pack.importName ?? pack.file)])
+    } catch (e) {
+      console.error('Katalog konnte nicht geladen werden', e)
+      setError(t('libraries.errors.invalid', { file: pack.name[language] }))
+    } finally {
+      setAdding(null)
     }
   }
 
@@ -160,6 +211,49 @@ export function LibrariesDialog({ onClose }: { onClose: () => void }) {
               ? t('libraries.deleteUsed', { name: confirm.library.name, projects: confirm.projects.join(', ') })
               : t('libraries.deleteConfirm', { name: confirm.library.name })}
           </Alert>
+        )}
+        {packs.length > 0 && (
+          <>
+            <Typography variant="subtitle2">{t('libraries.bundled')}</Typography>
+            <List dense disablePadding sx={{ mb: 2 }}>
+              {packs.map((pack) => (
+                <ListItem
+                  key={pack.id}
+                  divider
+                  secondaryAction={
+                    installed.has(pack.id) ? (
+                      <Tooltip title={t('libraries.installed')}>
+                        <CheckOutlined fontSize="small" color="success" sx={{ mr: 1 }} />
+                      </Tooltip>
+                    ) : (
+                      <Button
+                        size="small"
+                        startIcon={adding === pack.id ? <CircularProgress size={14} /> : <AddOutlined />}
+                        disabled={busy || adding !== null}
+                        onClick={() => void addPack(pack)}
+                      >
+                        {t('libraries.add')}
+                      </Button>
+                    )
+                  }
+                >
+                  <ListItemText
+                    sx={{ pr: 12 }}
+                    primary={pack.name[language] ?? pack.name.en}
+                    secondary={[
+                      t('libraries.counts', { furniture: pack.furniture, textures: pack.textures }),
+                      formatSize(pack.size),
+                      pack.provider,
+                      pack.license && t('libraries.license', { license: pack.license }),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  />
+                </ListItem>
+              ))}
+            </List>
+            <Typography variant="subtitle2">{t('libraries.own')}</Typography>
+          </>
         )}
         {libraries.length === 0 ? (
           <Typography color="text.secondary">{t('libraries.none')}</Typography>

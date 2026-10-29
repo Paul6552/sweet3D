@@ -72,7 +72,7 @@ export function ProjectsDialog({ onClose, currentId, onRenamed }: ProjectsDialog
   const [toDelete, setToDelete] = useState<ProjectSummary | null>(null)
   const [importing, setImporting] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
-  const language = i18n.resolvedLanguage ?? 'de'
+  const language = i18n.resolvedLanguage ?? 'en'
 
   const refresh = useCallback(() => readSnapshot().then(setSnapshot), [])
 

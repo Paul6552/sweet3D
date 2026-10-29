@@ -156,7 +156,7 @@ function TexturePicker({ onPick, onClose }: { onPick: (texture: TextureRef) => v
   const used = useMemo(() => (home ? usedTextures(home) : []), [home])
 
   useEffect(() => {
-    void load(i18n.resolvedLanguage ?? 'de')
+    void load(i18n.resolvedLanguage ?? 'en')
   }, [i18n.resolvedLanguage, load])
 
   const upload = async (file: File) => {

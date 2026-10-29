@@ -46,6 +46,10 @@ export const de = {
     openElsewhere: 'Dieses Projekt ist auch in einem anderen Tab geöffnet. Änderungen in beiden Tabs überschreiben sich gegenseitig.',
     restoreWindows: 'Fenster wiederherstellen',
     windows: 'Ansichten',
+    ctrl: 'Strg',
+    settings: 'Einstellungen',
+    language: 'Sprache',
+    languageAuto: 'Browsersprache ({{language}})',
   },
   panels: {
     catalog: 'Möbelkatalog',

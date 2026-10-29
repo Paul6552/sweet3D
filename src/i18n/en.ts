@@ -48,6 +48,10 @@ export const en: Resources = {
     openElsewhere: 'This project is also open in another tab. Changes in both tabs overwrite each other.',
     restoreWindows: 'Restore windows',
     windows: 'Views',
+    ctrl: 'Ctrl',
+    settings: 'Settings',
+    language: 'Language',
+    languageAuto: 'Browser language ({{language}})',
   },
   panels: {
     catalog: 'Furniture catalog',

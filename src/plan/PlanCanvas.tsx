@@ -502,7 +502,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const point = roundPoint(toPlan(event.clientX, event.clientY))
     // Das Katalog-Panel kann in einem anderen Fenster liegen: Katalog hier ggf. nachladen
     const catalog = useCatalogStore.getState()
-    await catalog.load(catalog.language ?? 'de')
+    await catalog.load(catalog.language ?? 'en')
     const catalogPiece = useCatalogStore.getState().findPiece(catalogId)
     if (!catalogPiece) return
     let piece = pieceFromCatalog(catalogPiece, point[0], point[1])

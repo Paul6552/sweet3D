@@ -68,7 +68,7 @@ export function CatalogPanel() {
   const pieceCount = useEditorStore((s) => s.home?.furniture.length ?? 0)
 
   useEffect(() => {
-    void load(i18n.resolvedLanguage ?? 'de')
+    void load(i18n.resolvedLanguage ?? 'en')
   }, [i18n.resolvedLanguage, load])
 
   const libraryFilter = libraries.some((l) => l.id === library) || library === BUILTIN ? library : ALL

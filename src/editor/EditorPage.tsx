@@ -35,6 +35,7 @@ import { PANELS } from './panels'
 import { useAutosave, type SaveState } from './useAutosave'
 import { useShortcuts } from './useShortcuts'
 import { MissingLibrariesNotice } from '../projects/MissingLibrariesNotice'
+import { SettingsMenu } from './SettingsMenu'
 
 const RESTORE_DELAY_MS = 1500
 
@@ -150,7 +151,7 @@ export function EditorPage() {
     const home = useEditorStore.getState().home
     if (!home) return
     try {
-      await downloadSh3d(home, name, i18n.resolvedLanguage ?? 'de')
+      await downloadSh3d(home, name, i18n.resolvedLanguage ?? 'en')
     } catch (error) {
       console.error(error)
       notify(t('projects.downloadError'))
@@ -193,14 +194,14 @@ export function EditorPage() {
             >
               {name}
             </Typography>
-            <Tooltip title={`${t('editor.undo')} (Strg+Z)`}>
+            <Tooltip title={`${t('editor.undo')} (${t('editor.ctrl')}+Z)`}>
               <span>
                 <IconButton size="small" disabled={!canUndo} onClick={() => dispatch({ type: 'undo' })} aria-label={t('editor.undo')}>
                   <Undo fontSize="small" />
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title={`${t('editor.redo')} (Strg+Y)`}>
+            <Tooltip title={`${t('editor.redo')} (${t('editor.ctrl')}+Y)`}>
               <span>
                 <IconButton size="small" disabled={!canRedo} onClick={() => dispatch({ type: 'redo' })} aria-label={t('editor.redo')}>
                   <Redo fontSize="small" />
@@ -231,6 +232,7 @@ export function EditorPage() {
                 {t('editor.restoreWindows')} ({restorable.length})
               </Button>
             )}
+            <SettingsMenu />
             <Tooltip title={t('projects.download')}>
               <IconButton size="small" onClick={() => void download()} aria-label={t('projects.download')}>
                 <DownloadOutlined fontSize="small" />

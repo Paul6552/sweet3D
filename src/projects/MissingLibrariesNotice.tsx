@@ -22,7 +22,7 @@ export function MissingLibrariesNotice({ projectId }: { projectId: string }) {
   const [importing, setImporting] = useState(false)
 
   useEffect(() => {
-    void load(i18n.resolvedLanguage ?? 'de')
+    void load(i18n.resolvedLanguage ?? 'en')
   }, [i18n.resolvedLanguage, load])
 
   const home = useEditorStore((s) => s.home)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Point } from './geometry'
 import type { Roof } from './home'
-import { cleanRing, computeRoof, createDormer, createRoof, edgeKind, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
+import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
 import { pointInPolygon, polygonArea, wallPolygon } from './geometry'
 
 const deg = (d: number) => (d * Math.PI) / 180
@@ -221,5 +221,34 @@ describe('Gauben', () => {
     expect(edgeKind(d, d.edges[1])).toBe('eave')
     expect(edgeKind(d, d.edges[2])).toBe('gable')
     expect(edgeKind(d, d.edges[3])).toBe('eave')
+  })
+})
+
+describe('Leicht versetzte Wände', () => {
+  // L-förmiges Haus, dessen Nordseite aus mehreren um wenige cm versetzten Wänden besteht
+  const outline: Point[] = [
+    [-223.4, -416.9], [132.2, -413.2], [217.9, -414.4], [343.3, -412.6], [456.6, -409.6], [505.9, -409.9], [808.4, -409.6], [843.1, -412.2],
+    [1255.1, -415.5], [1251.9, 581], [622.7, 581], [610.9, 579.1], [165.7, 577.5], [168.4, 105.9], [-223.2, 100.5], [-223.4, -265.3],
+  ]
+
+  it('Ecken sind nur die echten Hausecken', () => {
+    expect(cornerIndices(outline)).toEqual([0, 8, 9, 12, 13, 14])
+  })
+
+  it('Pultdach: die ganze lange Seite ist Traufe', () => {
+    const r = roof(outline, { shape: 'shed' })
+    const eaves = r.edges.map((e, i) => (e.profile ? -1 : i)).filter((i) => i >= 0)
+    expect(eaves).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    // Die Pultfläche steigt über die ganze Tiefe des Hauses
+    expect(computeRoof(r, { wallHeight: 250 }).ridge).toBeGreaterThan(250 + 900 * Math.tan(deg(40)))
+  })
+
+  it('Satteldach: Teilstücke einer Seite bekommen dieselbe Kantenart', () => {
+    const r = roof(outline)
+    const kinds = r.edges.map((e) => !!e.profile)
+    expect(new Set(kinds.slice(0, 8)).size).toBe(1)
+    expect(kinds[14]).toBe(kinds[15])
+    // Kein Giebel auf einem Teilstück der Nordseite
+    expect(kinds[7]).toBe(false)
   })
 })

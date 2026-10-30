@@ -10,7 +10,7 @@ import { pieceFromCatalog } from '../model/furniture'
 import { dimensionLength, distance, distanceToSegment, pointInPolygon, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
-import { createDormer, createRoof, outlineFromWalls, rawRoofModel, roofContour, roofHeightAt, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
+import { createDormer, createRoof, outlineFromWalls, rawRoofModel, roofContour, roofHeightAt, simplifyOutline, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
 import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
@@ -381,7 +381,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   /** Legt ein Dach über den Umriss an; {@code walls}: Wände darunter, deren Oberkante dem Dach folgt. */
   const addRoof = useCallback((outline: Point[], walls: Wall[] = []) => {
     const level = useEditorStore.getState().home!.selectedLevel
-    const roof = createRoof(outline, level)
+    const roof = createRoof(simplifyOutline(outline), level)
     const under = wallsUnderRoofEdge(walls, roof)
     const add: HomeCommand = { type: 'addItems', roofs: [roof] }
     executeCommand(under.length > 0 ? { type: 'batch', commands: [add, { type: 'updateWalls', changes: under.map((w) => ({ id: w.id, toRoof: true })) }] } : add)
@@ -605,6 +605,12 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         return
       }
       const point = toPlan(event.clientX, event.clientY)
+      // Doppelklick auf ein vorhandenes Dach dieser Ebene: auswählen statt ein zweites darüberzulegen
+      const existing = home.roofs.find((r) => !r.dormer && r.level === home.selectedLevel && pointInPolygon(point, r.points))
+      if (existing) {
+        dispatch({ type: 'select', ids: [existing.id] })
+        return
+      }
       // Doppelklick in ausgewählte Räume: Dach über ihre Vereinigung
       const selectedRooms = home.rooms.filter((r) => selection.includes(r.id))
       if (selectedRooms.some((r) => pointInPolygon(point, r.points))) {
@@ -612,20 +618,20 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
           const polygons: Polygon[] = selectedRooms.map((r) => [[...r.points, r.points[0]]])
           const union = polygonClipping.union(polygons[0], ...polygons.slice(1))
           const part = union.find((p) => pointInPolygon(point, p[0].slice(0, -1) as Point[])) ?? union[0]
-          if (part) addRoof(part[0].slice(0, -1) as Point[])
+          if (part) addRoof(part[0].slice(0, -1) as Point[], walls)
         } catch {
           // Ungültige Räume: kein Dach
         }
         return
       }
       // Doppelklick in ein Haus: Dach über den Außenumriss seiner Wände
-      const outline = outlineFromWalls(home.walls, point)
+      const outline = outlineFromWalls(walls, point)
       if (outline) {
-        addRoof(outline.points, home.walls)
+        addRoof(outline.points, walls)
         return
       }
       const room = [...home.rooms].reverse().find((r) => pointInPolygon(point, r.points))
-      if (room) addRoof(room.points)
+      if (room) addRoof(room.points, walls)
     } else if (mode === 'room') {
       const points = roomPoints.filter((p, i) => i === 0 || distance(p, roomPoints[i - 1]) > 0.5)
       if (points.length >= 3) {

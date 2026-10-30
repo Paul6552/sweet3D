@@ -2,7 +2,7 @@ import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'pol
 import { ExtrudeGeometry, Path, Shape, type BufferGeometry } from 'three'
 import type { HomePiece, Wall } from '../model/home'
 import { pieceCorners, wallPolygon, type Point } from '../model/geometry'
-import { halfPlane, linearZ, type LinearHeight, type WallCap } from '../model/roofs'
+import { halfPlane, linearZ, tryClip, type LinearHeight, type WallCap } from '../model/roofs'
 
 /** Materialgruppen einer Wandscheibe: Stirnseiten, Laibungen und Kanten bleiben in der Standardfarbe. */
 export const WALL_DEFAULT = 0
@@ -99,7 +99,7 @@ export function wallSlices(
     const sliceTop = sorted[i + 1]
     if (sliceTop - bottom < 1e-6) continue
     const active = openings.filter(({ piece }) => piece.elevation <= bottom && piece.elevation + piece.height >= sliceTop)
-    const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? polygonClipping.difference(area, ...active.map(({ area }) => [area] as Polygon)) : area)
+    const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? tryClip(() => polygonClipping.difference(area, ...active.map(({ area }) => [area] as Polygon)), area) : area)
     const full: MultiPolygon[] = []
     for (const cap of parts) {
       const [gx, gy, g0] = cap.height
@@ -112,10 +112,10 @@ export function wallSlices(
       const over = halfPlane(-gx, -gy, g0 - bottom, polygon)
       const under = cap.bottom ? halfPlane(cap.bottom[0], cap.bottom[1], sliceTop - cap.bottom[2], polygon) : null
       if (!over || (cap.bottom && !under)) continue
-      const area = polygonClipping.intersection(cap.area, over, ...(under ? [under] : []))
+      const area = tryClip(() => polygonClipping.intersection(cap.area, over, ...(under ? [under] : [])), [])
       if (area.length > 0) add(cut(area), bottom, sliceTop, cap)
     }
-    if (full.length > 0) add(cut(full.length === 1 ? full[0] : polygonClipping.union(full[0], ...full.slice(1))), bottom, sliceTop, null)
+    if (full.length > 0) add(cut(full.length === 1 ? full[0] : tryClip(() => polygonClipping.union(full[0], ...full.slice(1)), full.flat())), bottom, sliceTop, null)
   }
   return slices
 }

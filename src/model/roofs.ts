@@ -639,6 +639,39 @@ function edgeLengths(points: Point[]): number[] {
   })
 }
 
+/** Größter Abstand eines Zwischenpunkts von der Hausseite, bei dem er noch als gerade gilt (leicht versetzte Wände). */
+const STRAIGHT_TOLERANCE = 10
+
+/**
+ * Ecken des Umrisses: Indizes der Punkte, die nicht fast auf der Linie zwischen ihren Nachbarecken
+ * liegen. Entfernt wird immer der Punkt mit der kleinsten Abweichung, bis keiner mehr unter
+ * {@code tolerance} liegt.
+ */
+export function cornerIndices(points: Point[], tolerance = STRAIGHT_TOLERANCE): number[] {
+  const kept = points.map((_, i) => i)
+  while (kept.length > 3) {
+    let best = -1
+    let bestDistance = tolerance
+    kept.forEach((index, k) => {
+      const a = points[kept[(k + kept.length - 1) % kept.length]]
+      const b = points[kept[(k + 1) % kept.length]]
+      const d = distanceToSegment(points[index], a, b)
+      if (d < bestDistance) {
+        best = k
+        bestDistance = d
+      }
+    })
+    if (best < 0) break
+    kept.splice(best, 1)
+  }
+  return kept
+}
+
+/** Umriss ohne fast gerade Zwischenpunkte. */
+export function simplifyOutline(points: Point[], tolerance = STRAIGHT_TOLERANCE): Point[] {
+  return cornerIndices(points, tolerance).map((i) => points[i])
+}
+
 /**
  * Kanten, die bei einem Satteldach Giebel werden: Enden eines Firsts, also Kanten zwischen zwei
  * konvexen Ecken, deren Fläche beim Walmdach ein Dreieck ist. Ist das bei allen so (Quadrat,
@@ -681,9 +714,17 @@ export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | '
   const halfWidth = Math.max(50, hip45.ridge - 1)
   // Gaube: Kante 0 ist die Front, Kante 2 liegt im Hauptdach und bleibt immer Giebel
   const dormer = !!roof.dormer && points.length === 4
-  const gables = dormer ? new Set([0, 2]) : gableEdges(points)
-  const lengths = edgeLengths(points)
-  const longest = dormer ? 0 : lengths.indexOf(Math.max(...lengths))
+  // Hausseiten: fast gerade Kanten zählen zusammen, damit leicht versetzte Wände keine eigenen Giebel bekommen
+  const corners = dormer ? points.map((_, i) => i) : cornerIndices(points)
+  const sideOf = points.map((_, i) => {
+    const k = corners.findLastIndex((c) => c <= i)
+    return k < 0 ? corners.length - 1 : k
+  })
+  const sides = corners.map((i) => points[i])
+  const sideGables = dormer ? new Set([0, 2]) : gableEdges(sides)
+  const gables = new Set(points.map((_, i) => i).filter((i) => sideGables.has(sideOf[i])))
+  const lengths = edgeLengths(sides)
+  const longestSide = dormer ? 0 : lengths.indexOf(Math.max(...lengths))
   const gable: RoofProfileStep[] = [{ height: null, slope: GABLE }]
   const edge = (i: number, profile: RoofProfileStep[] | null): RoofEdge => ({ profile: dormer && i === 2 ? gable : profile, overhang: roof.edges[i]?.overhang ?? null })
   switch (shape) {
@@ -692,7 +733,7 @@ export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | '
     case 'gable':
       return { ...base, edges: points.map((_, i) => edge(i, gables.has(i) ? gable : null)) }
     case 'shed':
-      return { ...base, edges: points.map((_, i) => edge(i, i === longest ? null : gable)) }
+      return { ...base, edges: points.map((_, i) => edge(i, sideOf[i] === longestSide ? null : gable)) }
     case 'halfHip': {
       const ridge = halfWidth * Math.tan(slope)
       const profile: RoofProfileStep[] = [{ height: Math.round(ridge * 0.6), slope: GABLE }, { height: null, slope }]
@@ -824,15 +865,16 @@ export function wallCaps(
     .sort((a, b) => a.model.eave + a.shift - (b.model.eave + b.shift))
   for (const { model, shift } of roofs) {
     for (const surface of model.surfaces) {
-      let area = polygonClipping.intersection(wall, surface.rings.map(closed) as Polygon)
+      let area = tryClip(() => polygonClipping.intersection(wall, surface.rings.map(closed) as Polygon), [])
       if (area.length === 0) continue
-      if (assigned.length > 0) area = polygonClipping.difference(area, assigned)
+      if (assigned.length > 0) area = tryClip(() => polygonClipping.difference(area, assigned), area)
       if (area.length === 0) continue
-      assigned = polygonClipping.union(assigned, area)
+      assigned = tryClip(() => polygonClipping.union(assigned, area), [...assigned, ...area])
       caps.push({ area, height: underside(surface, shift) })
     }
   }
-  const rest = assigned.length > 0 ? polygonClipping.difference(wall, assigned) : [wall]
+  // Ohne Rest überdecken sich höchstens Teile; die höhere Kappe verdeckt dann die niedrigere
+  const rest = assigned.length > 0 ? tryClip(() => polygonClipping.difference(wall, assigned), [wall]) : [wall]
   if (rest.length > 0) caps.push({ area: rest, height: [0, 0, height] })
   if (!standOn) return caps
   // Wände einer Gaube stehen auf der Unterseite des Hauptdachs
@@ -843,14 +885,26 @@ export function wallCaps(
     for (const surface of standOn.model.surfaces) {
       if (rest.length === 0) break
       const ring = surface.rings.map(closed) as Polygon
-      const area = polygonClipping.intersection(rest, ring)
+      const area = tryClip(() => polygonClipping.intersection(rest, ring), [])
       if (area.length === 0) continue
       parts.push({ ...cap, area, bottom: underside(surface, shift) })
-      rest = polygonClipping.difference(rest, ring)
+      rest = tryClip(() => polygonClipping.difference(rest, ring), [])
     }
     if (rest.length > 0) parts.push({ ...cap, area: rest })
     return parts
   })
+}
+
+/**
+ * polygon-clipping scheitert gelegentlich an fast deckungsgleichen Kanten (leicht versetzte Wände);
+ * dann gilt {@code fallback}, statt dass die 3D-Ansicht abbricht.
+ */
+export function tryClip(operation: () => MultiPolygon, fallback: MultiPolygon): MultiPolygon {
+  try {
+    return operation()
+  } catch {
+    return fallback
+  }
 }
 
 /** Unterseite einer Dachfläche als lineare Höhe, um {@code shift} angehoben. */

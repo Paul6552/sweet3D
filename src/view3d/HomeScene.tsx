@@ -1,13 +1,16 @@
 import type { ThreeEvent } from '@react-three/fiber'
 import { memo, useMemo } from 'react'
+import polygonClipping, { type Polygon } from 'polygon-clipping'
 import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry } from 'three'
-import type { Home, Wall } from '../model/home'
-import { defaultWallHeight, levelsAbove, visibleLevels } from '../model/levels'
+import { useCatalogStore } from '../catalog/catalogStore'
+import type { Home, HomePiece, Wall } from '../model/home'
+import { defaultWallHeight, findLevel, levelsAbove, visibleLevels } from '../model/levels'
 import { dispatch } from '../store/editorStore'
 import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
-import { wallSlices } from './wallGeometry'
+import { roomGeometry, staircaseHoles, type StaircaseShapeOf } from './staircases'
+import { toShapes, wallSlices } from './wallGeometry'
 
 /** Mausbewegung in Pixeln, ab der ein Klick als Ziehen (Kamera) gilt. */
 const CLICK_TOLERANCE = 4
@@ -51,10 +54,6 @@ function wallMaterials(wall: Wall, highlight: string | null) {
   return [surfaceMaterial(null, WALL, highlight), surfaceMaterial(wall.leftSide, WALL, highlight), surfaceMaterial(wall.rightSide, WALL, highlight)]
 }
 
-function roomGeometry(points: [number, number][]): ShapeGeometry {
-  return new ShapeGeometry(new Shape(points.map(([x, y]) => ({ x, y }) as never)))
-}
-
 /** Kamerabewegungen ändern nur home.camera; die Szene muss dafür nicht neu gerendert werden. */
 const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
   a.selection === b.selection &&
@@ -76,7 +75,13 @@ const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
  */
 export const HomeScene = memo(function HomeScene({ home, selection, selectionColor, showCeilings, brightRooms, lampShadows }: HomeSceneProps) {
   const shadowLamps = useMemo(() => lampsWithShadows(home, lampShadows), [home, lampShadows])
-  const sceneProps = { home, selection, selectionColor, brightRooms, lampShadows, shadowLamps }
+  const catalog = useCatalogStore((s) => s.furniture)
+  // Möbel aus älteren Projekten kennen die Öffnung nicht selbst, dann gilt die des Katalogeintrags
+  const staircaseShapeOf = useMemo((): StaircaseShapeOf => {
+    const shapes = new Map(catalog?.categories.flatMap((c) => c.pieces.map((p) => [p.id, p.staircaseCutOutShape])))
+    return (piece: HomePiece) => (piece.staircaseCutOutShape !== undefined ? piece.staircaseCutOutShape : (shapes.get(piece.catalogId ?? '') ?? null))
+  }, [catalog])
+  const sceneProps = { home, selection, selectionColor, brightRooms, lampShadows, shadowLamps, staircaseShapeOf }
   return (
     <group>
       {visibleLevels(home).map((level) => (
@@ -131,28 +136,60 @@ function LevelScene({
   showCeilings,
   brightRooms,
   shadowLamps,
+  staircaseShapeOf,
   shadowOnly,
-}: HomeSceneProps & { levelId: string | null; shadowOnly: boolean; shadowLamps: Set<string> }) {
+}: HomeSceneProps & { levelId: string | null; shadowOnly: boolean; shadowLamps: Set<string>; staircaseShapeOf: StaircaseShapeOf }) {
   const levelWalls = useMemo(() => home.walls.filter((w) => w.level === levelId), [home.walls, levelId])
   const levelRooms = useMemo(() => home.rooms.filter((r) => r.level === levelId), [home.rooms, levelId])
   const levelFurniture = useMemo(() => home.furniture.filter((p) => p.level === levelId), [home.furniture, levelId])
   const height = defaultWallHeight(home, levelId)
+  // Wie in Sweet Home 3D: Wände aller Ebenen außer der untersten beginnen schon an der Unterseite der Decke darunter
+  const level = findLevel(home, levelId)
+  const floorThickness = level && level.elevation > home.levels[0].elevation ? level.floorThickness : 0
   const wallsById = useMemo(() => new Map(levelWalls.map((w) => [w.id, w])), [levelWalls])
   const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow), [levelFurniture])
   const walls = useMemo(
-    () => levelWalls.map((wall) => ({ wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById) })),
-    [levelWalls, height, doorsAndWindows, wallsById],
+    () => levelWalls.map((wall) => ({ wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById, floorThickness) })),
+    [levelWalls, height, doorsAndWindows, wallsById, floorThickness],
   )
-  const rooms = useMemo(() => levelRooms.map((room) => ({ room, geometry: roomGeometry(room.points) })), [levelRooms])
+  // Öffnungen der Treppen: im Boden von Treppen, die von unten durch die Decke darunter kommen,
+  // in der Decke von Treppen, die höher als die Decke reichen
+  const { floorHoles, ceilingHoles } = useMemo(
+    () => {
+      const elevation = level?.elevation ?? 0
+      const ceiling = elevation + height
+      return {
+        floorHoles: level ? staircaseHoles(home, elevation - level.floorThickness, elevation, staircaseShapeOf) : [],
+        ceilingHoles: staircaseHoles(home, ceiling, ceiling, staircaseShapeOf),
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Möbel und Höhen der Ebenen zählen
+    [home.furniture, home.levels, levelId, height, staircaseShapeOf],
+  )
+  const rooms = useMemo(
+    () =>
+      levelRooms.map((room) => {
+        const floor = roomGeometry(room.points, floorHoles)
+        const ceiling = floorHoles.length === 0 && ceilingHoles.length === 0 ? floor : roomGeometry(room.points, ceilingHoles)
+        return { room, floor, ceiling }
+      }),
+    [levelRooms, floorHoles, ceilingHoles],
+  )
   // Dach über den umschlossenen Räumen, auch ohne angezeigte Decke: sonst scheint die Sonne von oben ins Haus
   // und durch die Fenster wieder hinaus
   const roof = useMemo(
     () => {
-      const shapes = roofRectangles(home, levelId).map(([x, y, w, d]) => new Shape().moveTo(x, y).lineTo(x + w, y).lineTo(x + w, y + d).lineTo(x, y + d))
-      return shapes.length > 0 ? new ShapeGeometry(shapes) : null
+      const rectangles = roofRectangles(home, levelId)
+      if (rectangles.length === 0) return null
+      if (ceilingHoles.length === 0) {
+        return new ShapeGeometry(rectangles.map(([x, y, w, d]) => new Shape().moveTo(x, y).lineTo(x + w, y).lineTo(x + w, y + d).lineTo(x, y + d)))
+      }
+      // Die Rechtecke überlappen sich nicht und bilden zusammen ein Mehrfachpolygon
+      const roof = rectangles.map(([x, y, w, d]): Polygon => [[[x, y], [x + w, y], [x + w, y + d], [x, y + d], [x, y]]])
+      return new ShapeGeometry(toShapes(polygonClipping.difference(roof, ...ceilingHoles)))
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Wände und Höhen der Ebenen zählen
-    [home.walls, home.levels, home.wallHeight, levelId],
+    [home.walls, home.levels, home.wallHeight, levelId, ceilingHoles],
   )
 
   return (
@@ -176,14 +213,14 @@ function LevelScene({
         )),
       )}
 
-      {rooms.map(({ room, geometry }) => (
+      {rooms.map(({ room, floor, ceiling }) => (
         <group key={room.id}>
           {shadowOnly ? (
-            <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={0.5} {...shadowOnlyProps} />
+            <mesh geometry={floor} rotation-x={Math.PI / 2} position-y={0.5} {...shadowOnlyProps} />
           ) : (
             room.floorVisible && (
               <mesh
-                geometry={geometry}
+                geometry={floor}
                 rotation-x={Math.PI / 2}
                 position-y={0.5}
                 castShadow
@@ -196,9 +233,9 @@ function LevelScene({
           {/* Ohne Decke in der Ansicht (Luftansicht) wirft sie trotzdem Schatten, sonst scheint die Sonne in die Räume */}
           {room.ceilingVisible &&
             (showCeilings && !shadowOnly ? (
-              <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} castShadow receiveShadow material={surfaceMaterial(room.ceiling, CEILING)} />
+              <mesh geometry={ceiling} rotation-x={Math.PI / 2} position-y={height - 0.5} castShadow receiveShadow material={surfaceMaterial(room.ceiling, CEILING)} />
             ) : (
-              !brightRooms && <mesh geometry={geometry} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />
+              !brightRooms && <mesh geometry={ceiling} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />
             ))}
         </group>
       ))}

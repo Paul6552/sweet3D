@@ -138,6 +138,11 @@ export interface HomePiece {
   texture?: TextureRef | null
   /** Nur bei Leuchten gesetzt. */
   light?: LightInfo | null
+  /**
+   * Nur bei Treppen gesetzt: Öffnung in Böden und Decken darüber als SVG-Pfad im Einheitsquadrat
+   * (0..1, links oben = hinten links des Möbels) wie in Sweet Home 3D. Fehlt bei älteren Projekten.
+   */
+  staircaseCutOutShape?: string | null
   /** Bibliothek des Katalogeintrags; fehlt bei Möbeln aus dem Standardkatalog. */
   libraryId?: string | null
   level: string | null

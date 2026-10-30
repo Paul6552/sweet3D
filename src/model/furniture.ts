@@ -29,6 +29,7 @@ export function pieceFromCatalog(piece: CatalogPiece, x: number, y: number): Hom
     },
     color: piece.color,
     light: piece.light ?? null,
+    staircaseCutOutShape: piece.staircaseCutOutShape,
     ...(piece.libraryId && { libraryId: piece.libraryId }),
     level: null,
   }

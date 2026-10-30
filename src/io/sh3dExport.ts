@@ -247,6 +247,7 @@ async function pieceXml(
     movable: catalogPiece ? catalogPiece.movable : null,
     visible: piece.visible ? null : false,
     color: piece.color === null || piece.texture ? null : formatArgb(piece.color),
+    staircaseCutOutShape: piece.staircaseCutOutShape ?? catalogPiece?.staircaseCutOutShape ?? null,
     ...(door && {
       wallThickness: door.wallThickness,
       wallDistance: door.wallDistance,

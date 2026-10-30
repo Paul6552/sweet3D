@@ -202,6 +202,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       color: parseArgb(e.getAttribute('color')),
       texture: textureOf(e, null),
       light: e.nodeName === 'light' ? lightInfo(e) : null,
+      staircaseCutOutShape: e.getAttribute('staircaseCutOutShape') ?? catalogPiece?.staircaseCutOutShape ?? null,
       ...(libraryId && { libraryId }),
       level,
     }

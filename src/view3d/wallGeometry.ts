@@ -25,7 +25,8 @@ function cutOut(piece: HomePiece, wallThickness: number): Ring {
   return ring(pieceCorners({ ...piece, depth: piece.depth + 2 * wallThickness }))
 }
 
-function toShapes(multiPolygon: MultiPolygon): Shape[] {
+/** Polygone (mit Löchern) aus polygon-clipping als three.js-Formen. */
+export function toShapes(multiPolygon: MultiPolygon): Shape[] {
   return multiPolygon.map((polygon: Polygon) => {
     const [outer, ...holes] = polygon
     const shape = new Shape(outer.slice(0, -1).map(([x, y]) => ({ x, y }) as never))
@@ -38,8 +39,10 @@ function toShapes(multiPolygon: MultiPolygon): Shape[] {
  * Zerlegt eine Wand in Höhenscheiben an den Ober- und Unterkanten der Türen und Fenster.
  * In jeder Scheibe werden die Grundrisse der dort vorhandenen Öffnungen vom Wandumriss
  * abgezogen und die Fläche senkrecht extrudiert (wie Wall3D in Sweet Home 3D).
+ * {@code floorThickness}: so weit reicht die Wand unter den Boden der Ebene, damit zwischen den Wänden
+ * übereinanderliegender Ebenen keine Fuge in der Dicke der Decke bleibt.
  */
-export function wallSlices(wall: Wall, wallHeight: number, doorsAndWindows: HomePiece[], wallsById: Map<string, Wall>): WallSlice[] {
+export function wallSlices(wall: Wall, wallHeight: number, doorsAndWindows: HomePiece[], wallsById: Map<string, Wall>, floorThickness = 0): WallSlice[] {
   const height = wall.height ?? wallHeight
   const outline: Polygon = [ring(wallPolygon(wall, wallsById))]
   const openings = doorsAndWindows
@@ -47,7 +50,7 @@ export function wallSlices(wall: Wall, wallHeight: number, doorsAndWindows: Home
     .map((piece) => ({ piece, area: cutOut(piece, wall.thickness) }))
     .filter(({ area }) => polygonClipping.intersection(outline, [area]).length > 0)
 
-  const levels = new Set([0, height])
+  const levels = new Set([-floorThickness, 0, height])
   for (const { piece } of openings) {
     for (const z of [piece.elevation, piece.elevation + piece.height]) {
       if (z > 0 && z < height) levels.add(z)

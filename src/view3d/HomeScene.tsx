@@ -1,14 +1,16 @@
 import type { ThreeEvent } from '@react-three/fiber'
 import { memo, useMemo } from 'react'
 import polygonClipping, { type Polygon } from 'polygon-clipping'
-import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry } from 'three'
+import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry, type BufferGeometry } from 'three'
 import { useCatalogStore } from '../catalog/catalogStore'
-import type { Home, HomePiece, Wall } from '../model/home'
-import { defaultWallHeight, findLevel, levelsAbove, visibleLevels } from '../model/levels'
+import type { Home, HomePiece, Roof, Wall } from '../model/home'
+import { defaultWallHeight, findLevel, levelElevation, levelsAbove, visibleLevels } from '../model/levels'
+import { rawRoofModel, roofHeightAt, roofModels, type RoofModel } from '../model/roofs'
 import { dispatch } from '../store/editorStore'
 import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
+import { roofGeometry } from './roofGeometry'
 import { roomGeometry, staircaseHoles, type StaircaseShapeOf } from './staircases'
 import { toShapes, wallSlices } from './wallGeometry'
 
@@ -48,6 +50,14 @@ const SHADOW_USER_DATA = { photo: false }
 const WALL = '#f1eee8'
 const FLOOR = '#cdb79a'
 const CEILING = '#fafafa'
+const ROOF_TOP = '#9c4a33'
+const ROOF_UNDERSIDE = '#e6dccd'
+const ROOF_SIDES = '#f3efe8'
+
+/** Materialien in der Reihenfolge der Gruppen aus roofGeometry: Deckung, Untersicht, Stirnseiten. */
+function roofMaterials(roof: Roof, highlight: string | null) {
+  return [surfaceMaterial(roof.top, ROOF_TOP, highlight), surfaceMaterial(roof.underside, ROOF_UNDERSIDE, highlight), surfaceMaterial(roof.sides, ROOF_SIDES, highlight)]
+}
 
 /** Materialien in der Reihenfolge der Gruppen aus wallSlices: Kanten, linke Seite, rechte Seite. */
 function wallMaterials(wall: Wall, highlight: string | null) {
@@ -63,6 +73,7 @@ const sameScene = (a: HomeSceneProps, b: HomeSceneProps) =>
   a.lampShadows === b.lampShadows &&
   a.home.walls === b.home.walls &&
   a.home.rooms === b.home.rooms &&
+  a.home.roofs === b.home.roofs &&
   a.home.furniture === b.home.furniture &&
   a.home.levels === b.home.levels &&
   a.home.selectedLevel === b.home.selectedLevel &&
@@ -81,7 +92,22 @@ export const HomeScene = memo(function HomeScene({ home, selection, selectionCol
     const shapes = new Map(catalog?.categories.flatMap((c) => c.pieces.map((p) => [p.id, p.staircaseCutOutShape])))
     return (piece: HomePiece) => (piece.staircaseCutOutShape !== undefined ? piece.staircaseCutOutShape : (shapes.get(piece.catalogId ?? '') ?? null))
   }, [catalog])
-  const sceneProps = { home, selection, selectionColor, brightRooms, lampShadows, shadowLamps, staircaseShapeOf }
+  // Dächer mit Gauben und Öffnungen der Treppen, die bis über ihre Unterseite reichen
+  const roofs = useMemo(
+    () =>
+      roofModels(home, (roof) => {
+        const raw = rawRoofModel(home, roof)
+        const elevation = levelElevation(home, roof.level)
+        return staircaseHoles(home, elevation + raw.eave - 1000, elevation + raw.ridge, staircaseShapeOf, (piece, _, top) => {
+          const under = roofHeightAt(raw, [piece.x, piece.y], 'bottom')
+          return under !== null && top > elevation + under
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Dächer, Möbel und Höhen zählen
+    [home.roofs, home.furniture, home.levels, home.wallHeight, staircaseShapeOf],
+  )
+  const roofMeshes = useMemo(() => new Map([...roofs].map(([id, model]) => [id, roofGeometry(model)])), [roofs])
+  const sceneProps = { home, selection, selectionColor, brightRooms, lampShadows, shadowLamps, staircaseShapeOf, roofMeshes, roofs }
   return (
     <group>
       {visibleLevels(home).map((level) => (
@@ -138,10 +164,20 @@ function LevelScene({
   shadowLamps,
   staircaseShapeOf,
   shadowOnly,
-}: HomeSceneProps & { levelId: string | null; shadowOnly: boolean; shadowLamps: Set<string>; staircaseShapeOf: StaircaseShapeOf }) {
+  roofMeshes,
+  roofs,
+}: HomeSceneProps & {
+  levelId: string | null
+  shadowOnly: boolean
+  shadowLamps: Set<string>
+  staircaseShapeOf: StaircaseShapeOf
+  roofMeshes: Map<string, BufferGeometry>
+  roofs: Map<string, RoofModel>
+}) {
   const levelWalls = useMemo(() => home.walls.filter((w) => w.level === levelId), [home.walls, levelId])
   const levelRooms = useMemo(() => home.rooms.filter((r) => r.level === levelId), [home.rooms, levelId])
   const levelFurniture = useMemo(() => home.furniture.filter((p) => p.level === levelId), [home.furniture, levelId])
+  const levelRoofs = useMemo(() => home.roofs.filter((r) => r.level === levelId && r.visible), [home.roofs, levelId])
   const height = defaultWallHeight(home, levelId)
   // Wie in Sweet Home 3D: Wände aller Ebenen außer der untersten beginnen schon an der Unterseite der Decke darunter
   const level = findLevel(home, levelId)
@@ -181,15 +217,18 @@ function LevelScene({
     () => {
       const rectangles = roofRectangles(home, levelId)
       if (rectangles.length === 0) return null
-      if (ceilingHoles.length === 0) {
+      // Wo ein echtes Dach liegt, wirft es selbst Schatten (und lässt Licht durch Dachfenster)
+      const covered: Polygon[] = levelRoofs.flatMap((r) => roofs.get(r.id)?.outline.slice(0, 1).map((ring): Polygon => [[...ring, ring[0]]]) ?? [])
+      const cuts = [...ceilingHoles, ...covered]
+      if (cuts.length === 0) {
         return new ShapeGeometry(rectangles.map(([x, y, w, d]) => new Shape().moveTo(x, y).lineTo(x + w, y).lineTo(x + w, y + d).lineTo(x, y + d)))
       }
       // Die Rechtecke überlappen sich nicht und bilden zusammen ein Mehrfachpolygon
       const roof = rectangles.map(([x, y, w, d]): Polygon => [[[x, y], [x + w, y], [x + w, y + d], [x, y + d], [x, y]]])
-      return new ShapeGeometry(toShapes(polygonClipping.difference(roof, ...ceilingHoles)))
+      return new ShapeGeometry(toShapes(polygonClipping.difference(roof, ...cuts)))
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Wände und Höhen der Ebenen zählen
-    [home.walls, home.levels, home.wallHeight, levelId, ceilingHoles],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Wände, Dächer und Höhen der Ebenen zählen
+    [home.walls, home.levels, home.wallHeight, levelId, ceilingHoles, levelRoofs, roofs],
   )
 
   return (
@@ -241,6 +280,23 @@ function LevelScene({
       ))}
 
       {!brightRooms && roof && <mesh geometry={roof} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />}
+
+      {levelRoofs.map((r) => {
+        const geometry = roofMeshes.get(r.id)
+        if (!geometry) return null
+        return shadowOnly ? (
+          <mesh key={r.id} geometry={geometry} {...shadowOnlyProps} />
+        ) : (
+          <mesh
+            key={r.id}
+            geometry={geometry}
+            castShadow
+            receiveShadow
+            material={roofMaterials(r, selection.includes(r.id) ? selectionColor : null)}
+            onClick={(e) => selectOnClick(e, r.id, selection)}
+          />
+        )
+      })}
 
       {levelFurniture
         .filter((p) => p.visible && !shadowOnly)

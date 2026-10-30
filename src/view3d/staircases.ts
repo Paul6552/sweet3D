@@ -43,14 +43,22 @@ function staircaseOutline(piece: HomePiece, path: string): Ring[] {
 /**
  * Öffnungen aller sichtbaren Treppen, die durch die Schicht {@code bottom..top} (Höhen über dem Gelände)
  * reichen, wie in Sweet Home 3D: Treppen schneiden Böden der Ebenen darüber und Decken, über die sie hinausgehen.
+ * {@code accept}: weitere Bedingung je Treppe mit ihrer Ober- und Unterkante (z. B. für Dächer).
  */
-export function staircaseHoles(home: Home, bottom: number, top: number, shapeOf: StaircaseShapeOf): Polygon[] {
+export function staircaseHoles(
+  home: Home,
+  bottom: number,
+  top: number,
+  shapeOf: StaircaseShapeOf,
+  accept?: (piece: HomePiece, pieceBottom: number, pieceTop: number) => boolean,
+): Polygon[] {
   const holes: Polygon[] = []
   for (const piece of home.furniture) {
     const path = piece.visible ? shapeOf(piece) : null
     if (!path) continue
     const pieceBottom = levelElevation(home, piece.level) + piece.elevation
-    if (pieceBottom < top && pieceBottom + piece.height > bottom) holes.push(...staircaseOutline(piece, path).map((ring) => [ring]))
+    const pieceTop = pieceBottom + piece.height
+    if (pieceBottom < top && pieceTop > bottom && (!accept || accept(piece, pieceBottom, pieceTop))) holes.push(...staircaseOutline(piece, path).map((ring) => [ring]))
   }
   return holes
 }

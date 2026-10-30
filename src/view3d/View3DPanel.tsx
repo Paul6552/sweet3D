@@ -19,7 +19,8 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import { useTranslation } from 'react-i18next'
 import { ACESFilmicToneMapping, type Color, type Fog, Object3D, PCFShadowMap, Vector3 } from 'three'
 import type { CameraMode, Home } from '../model/home'
-import { visibleLevels } from '../model/levels'
+import { levelElevation, visibleLevels } from '../model/levels'
+import { rawRoofModel } from '../model/roofs'
 import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
@@ -43,7 +44,10 @@ function sceneBounds(home: Home, allLevels = false): SceneBounds {
   const b = homeBounds(home) ?? { minX: 0, minY: 0, maxX: 1000, maxY: 1000 }
   // Oberkante der obersten sichtbaren Ebene
   const levels = allLevels && home.levels.length > 0 ? home.levels : visibleLevels(home)
-  const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)))
+  const visible = new Set(levels.map((l) => l?.id ?? null))
+  // Dächer ragen über die Ebenen hinaus
+  const roofTops = home.roofs.filter((r) => visible.has(r.level)).map((r) => levelElevation(home, r.level) + rawRoofModel(home, r).ridge)
+  const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)), ...roofTops)
   const center = new Vector3((b.minX + b.maxX) / 2, top / 3, (b.minY + b.maxY) / 2)
   const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top) / 2 + 100
   return { center, radius }
@@ -208,6 +212,7 @@ export function View3DPanel() {
   const walls = home?.walls
   const furniture = home?.furniture
   const rooms = home?.rooms
+  const roofs = home?.roofs
   const wallHeight = home?.wallHeight
   const levels = home?.levels
   const level = home?.selectedLevel
@@ -217,6 +222,7 @@ export function View3DPanel() {
         walls: walls ?? [],
         furniture: furniture ?? [],
         rooms: rooms ?? [],
+        roofs: roofs ?? [],
         // Maßlinien und Texte gibt es in 3D nicht
         dimensionLines: [],
         labels: [],
@@ -224,7 +230,7 @@ export function View3DPanel() {
         levels: levels ?? [],
         selectedLevel: level ?? null,
       }) as unknown as Home,
-    [walls, furniture, rooms, wallHeight, levels, level],
+    [walls, furniture, rooms, roofs, wallHeight, levels, level],
   )
   const bounds = useMemo(() => sceneBounds(geometry), [geometry])
   const shadowBounds = useMemo(() => sceneBounds(geometry, true), [geometry])

@@ -14,7 +14,6 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { HomeCommand } from '../model/commands'
 import type { Level } from '../model/home'
 import { newLevels } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
@@ -30,10 +29,8 @@ export function LevelTabs() {
   const [editing, setEditing] = useState<Level | null>(null)
 
   const add = () => {
-    const { levels: created, base, raise } = newLevels(useEditorStore.getState().home!, (n) => t('levels.defaultName', { n }))
-    const add: HomeCommand = { type: 'addLevels', levels: created, assignExistingTo: base?.id ?? null }
-    // Das Dach-Niveau bleibt oben
-    executeCommand(raise ? { type: 'batch', commands: [{ type: 'updateLevel', change: raise }, add] } : add)
+    const { levels: created, base } = newLevels(useEditorStore.getState().home!, (n) => t('levels.defaultName', { n }))
+    executeCommand({ type: 'addLevels', levels: created, assignExistingTo: base?.id ?? null })
   }
 
   return (

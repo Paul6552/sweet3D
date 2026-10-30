@@ -1,5 +1,5 @@
 import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
-import { sortLevels } from './levels'
+import { settleRoofLevel, sortLevels } from './levels'
 import { refitSkylights } from './roofs'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
@@ -56,11 +56,15 @@ export function applyCommand(home: Home, command: HomeCommand): void {
         for (const item of homeItems(home)) item.level ??= command.assignExistingTo
       }
       home.levels = sortLevels([...home.levels, ...command.levels])
+      settleRoofLevel(home.levels)
+      home.levels = sortLevels(home.levels)
       home.selectedLevel = command.levels[command.levels.length - 1]?.id ?? home.selectedLevel
       break
     case 'updateLevel': {
       const level = home.levels.find((l) => l.id === command.change.id)
       if (level) Object.assign(level, command.change)
+      // Das Dach-Niveau folgt dem obersten Geschoss, außer es wird selbst geändert
+      if (level && !level.roof) settleRoofLevel(home.levels)
       home.levels = sortLevels(home.levels)
       break
     }
@@ -70,6 +74,8 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       const onLevel = new Set(homeItems(home).filter((i) => i.level === command.id).map((i) => i.id))
       applyCommand(home, { type: 'deleteItems', ids: [...onLevel] })
       home.levels.splice(index, 1)
+      settleRoofLevel(home.levels)
+      home.levels = sortLevels(home.levels)
       if (home.selectedLevel === command.id) home.selectedLevel = home.levels[Math.max(0, index - 1)]?.id ?? null
       if (home.levels.length === 0) {
         // Letzte Ebene gelöscht: wieder ein Projekt ohne Ebenen

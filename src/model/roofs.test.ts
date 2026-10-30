@@ -293,11 +293,12 @@ describe('Neues Geschoss unter dem Dach', () => {
     const home = createEmptyHome()
     home.levels = newRoofLevel(home, 'Dach', 'Ebene 0').levels
     const [ground, roofFloor] = home.levels
-    const { levels, raise } = newLevels(home, (n) => `Ebene ${n}`)
-    expect(levels[0].elevation).toBe(roofFloor.elevation)
-    expect(raise).toEqual({ id: roofFloor.id, elevation: levels[0].elevation + levels[0].height + roofFloor.floorThickness })
-    applyCommand(home, { type: 'batch', commands: [{ type: 'updateLevel', change: raise! }, { type: 'addLevels', levels, assignExistingTo: null }] })
+    const roofElevation = roofFloor.elevation
+    const { levels } = newLevels(home, (n) => `Ebene ${n}`)
+    expect(levels[0].elevation).toBe(roofElevation)
+    applyCommand(home, { type: 'addLevels', levels, assignExistingTo: null })
     expect(home.levels.map((l) => l.id)).toEqual([ground.id, levels[0].id, roofFloor.id])
+    expect(home.levels[2].elevation).toBe(levels[0].elevation + levels[0].height + roofFloor.floorThickness)
 
     const r = { ...roof(rect(800, 1200)), level: roofFloor.id }
     home.roofs = [r]
@@ -307,5 +308,18 @@ describe('Neues Geschoss unter dem Dach', () => {
     expect(wallCaps(home, models, ground.id, outline, 250).map((c) => c.height)).toEqual([[0, 0, 250]])
     // Neues Obergeschoss: reicht bis unter den First
     expect(Math.max(...wallCaps(home, models, levels[0].id, outline, 250).map((c) => c.height[2]))).toBeGreaterThan(250)
+  })
+
+  it('Löschen des Geschosses lässt das Dach-Niveau zurückrutschen', () => {
+    const home = createEmptyHome()
+    home.levels = newRoofLevel(home, 'Dach', 'Ebene 0').levels
+    const elevation = home.levels[1].elevation
+    const { levels } = newLevels(home, (n) => `Ebene ${n}`)
+    applyCommand(home, { type: 'addLevels', levels, assignExistingTo: null })
+    applyCommand(home, { type: 'deleteLevel', id: levels[0].id })
+    expect(home.levels.find((l) => l.roof)?.elevation).toBe(elevation)
+    // Höheres Erdgeschoss hebt das Dach mit
+    applyCommand(home, { type: 'updateLevel', change: { id: home.levels[0].id, height: 300 } })
+    expect(home.levels.find((l) => l.roof)?.elevation).toBe(elevation + 50)
   })
 })

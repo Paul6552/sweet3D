@@ -32,6 +32,7 @@ import {
 import { WebGLPathTracer } from 'three-gpu-pathtracer'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
 import { createSky, GROUND_BOUNCE } from './sky'
+import { currentExposure } from './eyeAdaptation'
 
 /** Szene und Kamera der 3D-Ansicht zum Zeitpunkt des Fotos. */
 export interface SceneHandle {
@@ -151,7 +152,8 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
     renderer.setSize(width, height, false)
     renderer.outputColorSpace = SRGBColorSpace
     renderer.toneMapping = ACESFilmicToneMapping
-    renderer.toneMappingExposure = 0.9
+    // Wie die 3D-Ansicht an Innenräume angepasst
+    renderer.toneMappingExposure = 0.9 * currentExposure()
     const source = current.camera as PerspectiveCamera
     const camera = new PerspectiveCamera(source.fov, width / height, source.near, source.far)
     camera.position.setFromMatrixPosition(source.matrixWorld)

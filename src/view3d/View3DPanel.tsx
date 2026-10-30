@@ -36,6 +36,7 @@ import { QUALITIES, QUALITY_PROFILES, type QualityProfile, useQualityStore } fro
 import { ThumbnailRecorder } from './ThumbnailRecorder'
 import { useBrightRoomsStore } from './brightRooms'
 import { IndoorLighting } from './indoorLight'
+import { EyeAdaptation } from './eyeAdaptation'
 
 /** {@code allLevels}: auch die ausgeblendeten Ebenen darüber (für den Schattenbereich der Sonne). */
 function sceneBounds(home: Home, allLevels = false): SceneBounds {
@@ -310,6 +311,7 @@ export function View3DPanel() {
             <Lights bounds={shadowBounds} profile={profile} light={light} />
             <ShadowUpdates />
             <IndoorLighting home={geometry} light={light} bright={brightRooms} />
+            <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground />
             <HomeScene

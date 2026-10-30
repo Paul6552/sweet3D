@@ -12,6 +12,7 @@ import {
   ShaderChunk,
   UnsignedByteType,
   Vector2,
+  type Vector3,
   Vector4,
   type WebGLProgramParametersWithUniforms,
 } from 'three'
@@ -44,8 +45,13 @@ const WINDOW_SILL = 30
 const RECEIVER_HEIGHT = 100
 /** Verstärkung des Himmelslichts durch Fenster: Räume mit Fenstern sollen nicht düster wirken. */
 const WINDOW_GAIN = 2.5
-/** Anteil des Lichts, das im Raum von Wänden, Boden und Decke zurückgeworfen wird. */
-const BOUNCE = 0.5
+/** Mittlerer Reflexionsgrad von Wänden, Boden und Decke. */
+const REFLECTANCE = 0.5
+/**
+ * Anteil des einfallenden Lichts, der als zurückgeworfenes Licht im Raum ankommt: Licht wird
+ * zwischen den Flächen mehrfach reflektiert (Split-Flux-Verfahren, Φ·ρ / (S·(1−ρ))).
+ */
+const BOUNCE = REFLECTANCE / (1 - REFLECTANCE)
 /** Weitergereichtes Himmelslicht aus einem Nachbarraum durch eine Innentür. */
 const BORROWED = 0.5
 
@@ -80,8 +86,10 @@ interface Layer {
   sky: Float32Array
   /** Raum (zusammenhängende, von Wänden umschlossene Fläche) je Zelle; 0 im Freien. */
   label: Int32Array
-  /** Raum mit Decke bzw. Ebene darüber je Raum. */
+  /** Überdachter Raum je Raum; jeder von Wänden umschlossene Raum hat ein Dach. */
   roofed: boolean[]
+  /** Mittleres Himmelslicht je Raum. */
+  skyAverage: number[]
   /** Innenfläche (Boden, Decke, Wände) je Raum in cm². */
   surface: number[]
   /** Zurückgeworfenes Licht der Leuchten je Raum (linear). */
@@ -168,11 +176,13 @@ function wallOf(piece: HomePiece, walls: Wall[]): Wall | null {
   return best
 }
 
-function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bottom: number, top: number, aboveIds: Set<string>): Layer {
+/**
+ * Räume im Raster: {@code label} ist 0 im Freien, sonst die Nummer der zusammenhängenden, von
+ * Wänden (mindestens halb so hoch wie die Ebene) umschlossenen Fläche, NONE auf den Wänden.
+ */
+function labelRooms(home: Home, grid: Grid, walls: Wall[], height: number) {
   const cells = grid.nx * grid.ny
-  const walls = home.walls.filter((w) => levelIds.has(w.level))
   const wallsById = new Map(walls.map((w) => [w.id, w]))
-  const height = top - bottom
 
   // Wände ins Raster; für das Abschließen der Räume zusätzlich um eine Zelle verbreitert, damit kleine Lücken an Ecken nicht stören
   const wall = new Uint8Array(cells)
@@ -184,14 +194,6 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
   }
   const blocked = wall.slice()
   for (let index = 0; index < cells; index++) if (wall[index]) for (const n of neighbours(grid, index)) blocked[n] = 1
-
-  // Überdacht: Raum mit Decke auf dieser Ebene oder irgendein Raum darüber
-  const covered = new Uint8Array(cells)
-  for (const room of home.rooms) {
-    if ((levelIds.has(room.level) && room.ceilingVisible) || (room.level !== null && aboveIds.has(room.level))) {
-      fillPolygon(grid, room.points, (index) => (covered[index] = 1))
-    }
-  }
 
   // Draußen ist alles, was vom Rand aus erreichbar ist; jede übrige zusammenhängende Fläche ist ein Raum
   const label = new Int32Array(cells).fill(NONE)
@@ -222,21 +224,73 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
     copyLabel,
     labelled,
   )
+  return { label, rooms }
+}
 
-  // Fläche, Umfang und Überdachung je Raum
+/**
+ * Dach über den von Wänden umschlossenen Räumen einer Ebene als Rechtecke im Plan (x, y, Breite,
+ * Tiefe): Ein Haus hat ein Dach, auch wenn keine Decke angezeigt wird. Die Wände selbst gehören
+ * dazu, damit zwischen Dach und Wand keine Fuge bleibt. Das Raster überbrückt wie die Lichtkarte
+ * kleine Lücken zwischen Wänden.
+ */
+export function roofRectangles(home: Home, levelId: string | null): [number, number, number, number][] {
+  const walls = home.walls.filter((w) => w.level === levelId)
+  if (walls.length === 0) return []
+  const xs = walls.flatMap((w) => [w.xStart, w.xEnd])
+  const ys = walls.flatMap((w) => [w.yStart, w.yEnd])
+  const width = Math.max(...xs) - Math.min(...xs) + 2 * MARGIN
+  const depth = Math.max(...ys) - Math.min(...ys) + 2 * MARGIN
+  const cell = Math.max(MIN_CELL, width / MAX_CELLS, depth / MAX_CELLS)
+  const grid: Grid = { minX: Math.min(...xs) - MARGIN, minY: Math.min(...ys) - MARGIN, cell, nx: Math.ceil(width / cell), ny: Math.ceil(depth / cell) }
+  const { label } = labelRooms(home, grid, walls, defaultWallHeight(home, levelId))
+  // Abschnitte je Zeile; gleiche Abschnitte in aufeinanderfolgenden Zeilen werden zu einem Rechteck
+  const rectangles: { i0: number; i1: number; j0: number; rows: number }[] = []
+  let open = new Map<string, (typeof rectangles)[number]>()
+  for (let j = 0; j < grid.ny; j++) {
+    const next = new Map<string, (typeof rectangles)[number]>()
+    for (let i = 0; i < grid.nx; i++) {
+      if (label[j * grid.nx + i] === OUTSIDE) continue
+      const i0 = i
+      while (i + 1 < grid.nx && label[j * grid.nx + i + 1] !== OUTSIDE) i++
+      const key = `${i0}-${i}`
+      let rectangle = open.get(key)
+      if (rectangle) rectangle.rows++
+      else rectangles.push((rectangle = { i0, i1: i, j0: j, rows: 1 }))
+      next.set(key, rectangle)
+    }
+    open = next
+  }
+  return rectangles.map(({ i0, i1, j0, rows }) => [grid.minX + i0 * cell, grid.minY + j0 * cell, (i1 - i0 + 1) * cell, rows * cell])
+}
+
+function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bottom: number, top: number, aboveIds: Set<string>): Layer {
+  const cells = grid.nx * grid.ny
+  const walls = home.walls.filter((w) => levelIds.has(w.level))
+  const height = top - bottom
+  const { label, rooms } = labelRooms(home, grid, walls, height)
+  const labelled = (index: number) => label[index] !== NONE
+
+  // Überdacht: Raum mit Decke auf dieser Ebene oder irgendein Raum darüber
+  const covered = new Uint8Array(cells)
+  for (const room of home.rooms) {
+    if ((levelIds.has(room.level) && room.ceilingVisible) || (room.level !== null && aboveIds.has(room.level))) {
+      fillPolygon(grid, room.points, (index) => (covered[index] = 1))
+    }
+  }
+
+  // Fläche und Umfang je Raum
   const area = new Array<number>(rooms + 1).fill(0)
   const edges = new Array<number>(rooms + 1).fill(0)
-  const coveredCells = new Array<number>(rooms + 1).fill(0)
   for (let index = 0; index < cells; index++) {
     const l = label[index]
     if (l <= OUTSIDE) continue
     area[l]++
-    if (covered[index]) coveredCells[l]++
     for (const n of neighbours(grid, index)) if (label[n] !== l) edges[l]++
   }
   const cellArea = grid.cell * grid.cell
   const surface = area.map((a, l) => Math.max(1, 2 * a * cellArea + edges[l] * grid.cell * height))
-  const roofed = area.map((a, l) => l > OUTSIDE && coveredCells[l] > a / 2)
+  // Ein Haus hat ein Dach: auch Räume, deren Decke nicht angezeigt wird, sind überdacht (siehe HomeScene)
+  const roofed = area.map((_, l) => l > OUTSIDE)
 
   // Türen und Fenster: je Seite, die in einem Raum liegt, eine Öffnung dorthin
   interface Opening {
@@ -306,7 +360,12 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
     average[l] /= Math.max(1, roomCells[l].length)
   }
   for (const opening of openings) if (opening.other > OUTSIDE && roofed[opening.other]) shine(opening, average[opening.other] * BORROWED)
-  for (let l = 1; l <= rooms; l++) for (const index of roomCells[l]) sky[index] = Math.min(1, WINDOW_GAIN * raw[index])
+  const skyAverage = new Array<number>(rooms + 1).fill(1)
+  for (let l = 1; l <= rooms; l++) {
+    let sum = 0
+    for (const index of roomCells[l]) sum += sky[index] = Math.min(1, WINDOW_GAIN * raw[index])
+    skyAverage[l] = sum / Math.max(1, roomCells[l].length)
+  }
 
   // Wände selbst übernehmen den Wert der Nachbarzelle (für Flächen genau an der Wand)
   spread(
@@ -335,7 +394,7 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
     lamps[l].add(color)
   }
 
-  return { bottom, top, sky, label, roofed, surface, lamps, sunOpenings }
+  return { bottom, top, sky, label, roofed, skyAverage, surface, lamps, sunOpenings }
 }
 
 /** Karten für die sichtbaren Ebenen; Ebenen gleicher Höhe teilen sich eine. */
@@ -387,10 +446,34 @@ const uniforms = {
   indoorEnabled: { value: 1 },
 }
 
+/** Zuletzt geschriebene Karten mit dem zurückgeworfenen Licht je Ebene und Raum (für die Augenanpassung). */
+let written: { data: IndoorLight; fills: Color[][] } | null = null
+
+/**
+ * Licht im überdachten Raum an {@code point} (Szene in cm): mittleres Himmelslicht (Anteil) und
+ * Luminanz des zurückgeworfenen Lichts; null im Freien.
+ */
+export function indoorLightAt(point: Vector3): { sky: number; fill: number } | null {
+  if (!written) return null
+  const { data, fills } = written
+  let n = -1
+  data.layers.forEach((layer, i) => {
+    if (point.y >= layer.bottom - 1) n = i
+  })
+  const layer = data.layers[n]
+  if (!layer || point.y > layer.top + 5) return null
+  const index = cellIndex(data.grid, [point.x, point.z])
+  const l = index < 0 ? OUTSIDE : layer.label[index]
+  if (l <= OUTSIDE || !layer.roofed[l]) return null
+  const fill = fills[n][l]
+  return { sky: layer.skyAverage[l], fill: 0.2126 * fill.r + 0.7152 * fill.g + 0.0722 * fill.b }
+}
+
 /** Schreibt die Karten in die Textur; die Sonne durch die Fenster hängt vom Sonnenstand ab. */
 function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
   if (!data || data.layers.length === 0) {
     uniforms.indoorCount.value = 0
+    written = null
     return
   }
   const { grid, layers } = data
@@ -409,7 +492,7 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
   const roomPixels = uniforms.indoorRooms.value.image.data as Uint8Array
   const pixels = texture.image.data as Uint16Array
   const sun = light.direction
-  layers.forEach((layer, n) => {
+  const fills = layers.map((layer) => {
     // Sonne, die durch die Öffnungen fällt, wird im Raum zurückgeworfen
     const fill = layer.lamps.map((c) => c.clone())
     for (const opening of layer.sunOpenings) {
@@ -417,6 +500,11 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
       if (cos <= 0 || light.sunIntensity <= 0) continue
       fill[opening.label].add(light.sunColor.clone().multiplyScalar((light.sunIntensity * BOUNCE * opening.area * cos) / layer.surface[opening.label]))
     }
+    return fill
+  })
+  written = { data, fills }
+  layers.forEach((layer, n) => {
+    const fill = fills[n]
     const offset = n * cells * 4
     for (let index = 0; index < cells; index++) {
       const l = layer.label[index]

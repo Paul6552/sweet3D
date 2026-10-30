@@ -2,6 +2,8 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import {
   CircleGeometry,
+  CubeCamera,
+  HalfFloatType,
   Mesh,
   MeshBasicMaterial,
   PMREMGenerator,
@@ -10,7 +12,11 @@ import {
   SRGBColorSpace,
   type Texture,
   TextureLoader,
+  Vector3,
+  WebGLCubeRenderTarget,
 } from 'three'
+import { LightProbeGenerator } from 'three/examples/jsm/lights/LightProbeGenerator.js'
+import { setSkyIrradiance } from './eyeAdaptation'
 import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
 
 /** Rasen aus dem Texturkatalog von Sweet Home 3D. */
@@ -71,7 +77,20 @@ export function Sky({ environmentSize, daylight }: { environmentSize: number; da
     const target = generator.fromScene(environment, 0, 0.1, 100, { size: environmentSize })
     const { scene } = get()
     scene.environment = target.texture
+    // Himmelslicht auf eine waagrechte Fläche, als Maßstab für die Augenanpassung
+    let cancelled = false
+    const cube = new WebGLCubeRenderTarget(16, { type: HalfFloatType })
+    new CubeCamera(0.1, 100, cube).update(gl, environment)
+    void LightProbeGenerator.fromCubeRenderTarget(gl, cube)
+      .then((probe) => {
+        // Ergebnis als rgb in x, y, z
+        const irradiance = probe.sh.getIrradianceAt(new Vector3(0, 1, 0), new Vector3())
+        if (!cancelled) setSkyIrradiance(0.2126 * irradiance.x + 0.7152 * irradiance.y + 0.0722 * irradiance.z)
+      })
+      .catch(() => {})
+      .finally(() => cube.dispose())
     return () => {
+      cancelled = true
       scene.environment = null
       target.dispose()
       generator.dispose()

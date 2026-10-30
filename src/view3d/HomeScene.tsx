@@ -4,6 +4,7 @@ import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry } from 'thr
 import type { Home, Wall } from '../model/home'
 import { defaultWallHeight, levelsAbove, visibleLevels } from '../model/levels'
 import { dispatch } from '../store/editorStore'
+import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
 import { wallSlices } from './wallGeometry'
@@ -143,6 +144,16 @@ function LevelScene({
     [levelWalls, height, doorsAndWindows, wallsById],
   )
   const rooms = useMemo(() => levelRooms.map((room) => ({ room, geometry: roomGeometry(room.points) })), [levelRooms])
+  // Dach über den umschlossenen Räumen, auch ohne angezeigte Decke: sonst scheint die Sonne von oben ins Haus
+  // und durch die Fenster wieder hinaus
+  const roof = useMemo(
+    () => {
+      const shapes = roofRectangles(home, levelId).map(([x, y, w, d]) => new Shape().moveTo(x, y).lineTo(x + w, y).lineTo(x + w, y + d).lineTo(x, y + d))
+      return shapes.length > 0 ? new ShapeGeometry(shapes) : null
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Wände und Höhen der Ebenen zählen
+    [home.walls, home.levels, home.wallHeight, levelId],
+  )
 
   return (
     <>
@@ -191,6 +202,8 @@ function LevelScene({
             ))}
         </group>
       ))}
+
+      {!brightRooms && roof && <mesh geometry={roof} rotation-x={Math.PI / 2} position-y={height - 0.5} {...shadowOnlyProps} />}
 
       {levelFurniture
         .filter((p) => p.visible && !shadowOnly)

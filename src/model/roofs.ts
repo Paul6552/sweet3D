@@ -844,8 +844,8 @@ export const linearZ = ([gx, gy, g0]: LinearHeight, [x, y]: Point) => gx * x + g
 
 /**
  * Oberkante einer Wand, die bis zum Dach reicht: Der Grundriss {@code outline} wird nach den
- * Dachflächen darüber aufgeteilt, dort folgt die Wand der Unterseite (auch von Dächern anderer
- * Ebenen, über die absolute Höhe). Liegen Flächen übereinander, gilt die des niedrigeren Dachs. Wo
+ * Dachflächen darüber aufgeteilt, dort folgt die Wand der Unterseite (auch von Dächern der Ebene
+ * darüber, über die absolute Höhe). Liegen Flächen übereinander, gilt die des niedrigeren Dachs. Wo
  * kein Dach ist, bleibt die Wand {@code height} hoch.
  */
 export function wallCaps(
@@ -860,7 +860,11 @@ export function wallCaps(
   const wall: Polygon = [closed(outline)]
   const caps: WallCap[] = []
   let assigned: MultiPolygon = []
+  // Nur Dächer dieser Ebene und der direkt darüber: Liegt ein Geschoss dazwischen, endet die Wand an dessen Decke
+  const index = home.levels.findIndex((l) => l.id === level)
+  const above = index >= 0 ? (home.levels[index + 1]?.id ?? null) : null
   const roofs = home.roofs
+    .filter((roof) => roof.level === level || (above !== null && roof.level === above))
     .map((roof) => ({ model: models.get(roof.id), shift: levelElevation(home as Home, roof.level) - base }))
     .filter((r): r is { model: RoofModel; shift: number } => !!r.model && r.model.ridge + r.shift > 0)
     .sort((a, b) => a.model.eave + a.shift - (b.model.eave + b.shift))

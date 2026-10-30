@@ -87,24 +87,31 @@ export function sortLevels(levels: Level[]): Level[] {
 }
 
 /**
- * Neue Ebene über der obersten. Hat das Projekt noch keine Ebenen, entsteht zusätzlich die
- * Ebene 0 für alles Bisherige (wie in Sweet Home 3D).
+ * Neue Ebene über der obersten, aber unter dem Dach-Niveau, das dafür um ein Geschoss nach oben
+ * rückt ({@code raise}). Hat das Projekt noch keine Ebenen, entsteht zusätzlich die Ebene 0 für alles
+ * Bisherige (wie in Sweet Home 3D).
  */
-export function newLevels(home: Home, name: (index: number) => string): { levels: Level[]; base: Level | null } {
+export function newLevels(
+  home: Home,
+  name: (index: number) => string,
+): { levels: Level[]; base: Level | null; raise: { id: string; elevation: number } | null } {
   const base: Level | null =
     home.levels.length === 0
       ? { id: newId('level'), name: name(0), elevation: 0, floorThickness: DEFAULT_FLOOR_THICKNESS, height: home.wallHeight, viewable: true }
       : null
-  const top = base ?? home.levels[home.levels.length - 1]
+  const storeys = home.levels.filter((l) => !l.roof)
+  const top = base ?? storeys[storeys.length - 1] ?? home.levels[home.levels.length - 1]
   const level: Level = {
     id: newId('level'),
-    name: name(home.levels.length + (base ? 1 : 0)),
+    name: name(storeys.length + (base ? 1 : 0)),
     elevation: top.elevation + top.height + DEFAULT_FLOOR_THICKNESS,
     floorThickness: DEFAULT_FLOOR_THICKNESS,
     height: top.height,
     viewable: true,
   }
-  return { levels: base ? [base, level] : [level], base }
+  const roof = roofLevel(home)
+  const raise = roof && roof.elevation < level.elevation + level.height + roof.floorThickness ? { id: roof.id, elevation: level.elevation + level.height + roof.floorThickness } : null
+  return { levels: base ? [base, level] : [level], base, raise }
 }
 
 /** Neues Dach-Niveau über dem obersten (mit Ebene 0, falls das Projekt noch keine Ebenen hat). */

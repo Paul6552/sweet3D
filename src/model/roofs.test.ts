@@ -4,7 +4,7 @@ import type { Roof } from './home'
 import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, rawRoofModel, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
 import { pointInPolygon, polygonArea, wallPolygon } from './geometry'
 import { createEmptyHome } from './home'
-import { newRoofLevel } from './levels'
+import { newLevels, newRoofLevel } from './levels'
 import { applyCommand } from './commands'
 
 const deg = (d: number) => (d * Math.PI) / 180
@@ -285,5 +285,27 @@ describe('Dach-Niveau', () => {
     applyCommand(home, { type: 'deleteLevel', id: levels[1].id })
     expect(home.roofs).toEqual([])
     expect(home.levels.map((l) => l.id)).toEqual([levels[0].id])
+  })
+})
+
+describe('Neues Geschoss unter dem Dach', () => {
+  it('kommt unter das Dach-Niveau, das nach oben rückt; Wände darunter enden an der Decke', () => {
+    const home = createEmptyHome()
+    home.levels = newRoofLevel(home, 'Dach', 'Ebene 0').levels
+    const [ground, roofFloor] = home.levels
+    const { levels, raise } = newLevels(home, (n) => `Ebene ${n}`)
+    expect(levels[0].elevation).toBe(roofFloor.elevation)
+    expect(raise).toEqual({ id: roofFloor.id, elevation: levels[0].elevation + levels[0].height + roofFloor.floorThickness })
+    applyCommand(home, { type: 'batch', commands: [{ type: 'updateLevel', change: raise! }, { type: 'addLevels', levels, assignExistingTo: null }] })
+    expect(home.levels.map((l) => l.id)).toEqual([ground.id, levels[0].id, roofFloor.id])
+
+    const r = { ...roof(rect(800, 1200)), level: roofFloor.id }
+    home.roofs = [r]
+    const models = new Map([[r.id, rawRoofModel(home, r)]])
+    const outline: Point[] = [[0, 390], [1200, 390], [1200, 410], [0, 410]]
+    // Erdgeschoss: kein Dach direkt darüber, also eine waagrechte Oberkante
+    expect(wallCaps(home, models, ground.id, outline, 250).map((c) => c.height)).toEqual([[0, 0, 250]])
+    // Neues Obergeschoss: reicht bis unter den First
+    expect(Math.max(...wallCaps(home, models, levels[0].id, outline, 250).map((c) => c.height[2]))).toBeGreaterThan(250)
   })
 })

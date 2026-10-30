@@ -42,8 +42,10 @@ export interface RoofModel {
   surfaces: RoofSurface[]
   /** Umriss mit Überstand (äußerer Ring, dann Innenhöfe). */
   outline: Point[][]
-  /** Wandlinie (Traufpolygon ohne Überstand). */
+  /** Wandlinie (Traufpolygon ohne Überstand), Umlaufsinn wie {@code outline}. */
   wallLine: Point[][]
+  /** Je Kante von {@code outline[0]} bzw. {@code wallLine[0]} der Index in {@code Roof.edges}. */
+  edgeIndex: number[]
   /** First, Grate, Kehlen und Knicke als Linien im Plan (mit Höhe). */
   lines: [Point3, Point3][]
   /** Höhe, in der die Unterseite die Wandlinie trifft. */
@@ -282,7 +284,7 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
   const eave = roof.baseHeight ?? context.wallHeight
   const thickness = Math.max(1, roof.thickness)
   const { rings, edgeSettings, edgeIndex } = roofInput(roof)
-  const empty: RoofModel = { surfaces: [], outline: [], wallLine: rings, lines: [], eave, ridge: eave, flat: false, parapet: null }
+  const empty: RoofModel = { surfaces: [], outline: [], wallLine: rings, edgeIndex: edgeIndex[0], lines: [], eave, ridge: eave, flat: false, parapet: null }
   if (rings[0].length < 3 || polygonArea(rings[0]) < 1) return empty
 
   const overhangs = edgeSettings.map((ring) => ring.map((e) => Math.max(0, e?.overhang ?? roof.overhang)))
@@ -398,7 +400,51 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
       parapet = null
     }
   }
-  return { surfaces: result, outline, wallLine: rings, lines, eave, ridge, flat, parapet }
+  return { surfaces: result, outline, wallLine: rings, edgeIndex: edgeIndex[0], lines, eave, ridge, flat, parapet }
+}
+
+// ——— Dächer eines Projekts ———
+
+const rawCache = new WeakMap<Roof, { wallHeight: number; model: RoofModel }>()
+
+/** Dach ohne Öffnungen und Gauben; zwischengespeichert, solange sich das Dach nicht ändert. */
+export function rawRoofModel(home: Pick<Home, 'levels' | 'wallHeight'>, roof: Roof): RoofModel {
+  const wallHeight = defaultWallHeight(home as Home, roof.level)
+  const cached = rawCache.get(roof)
+  if (cached && cached.wallHeight === wallHeight) return cached.model
+  const model = computeRoof(roof, { wallHeight })
+  rawCache.set(roof, { wallHeight, model })
+  return model
+}
+
+/**
+ * Alle Dächer mit Gauben: Gauben fallen weg, wo sie unter ihrem Hauptdach liegen, das Hauptdach ist
+ * innerhalb der Gaube offen, wo es unter ihr liegt. {@code holes}: weitere Öffnungen je Dach (Treppen,
+ * Dachfenster) im Plan.
+ */
+export function roofModels(home: Pick<Home, 'levels' | 'wallHeight' | 'roofs'>, holes?: (roof: Roof) => Polygon[]): Map<string, RoofModel> {
+  const byId = new Map(home.roofs.map((r) => [r.id, r]))
+  const result = new Map<string, RoofModel>()
+  for (const roof of home.roofs) {
+    const raw = rawRoofModel(home, roof)
+    const extraHoles = holes?.(roof) ?? []
+    const main = roof.dormer ? byId.get(roof.dormer.roofId) : undefined
+    const dormers = home.roofs.filter((r) => r.dormer?.roofId === roof.id)
+    if (extraHoles.length === 0 && !main && dormers.length === 0) {
+      result.set(roof.id, raw)
+      continue
+    }
+    result.set(
+      roof.id,
+      computeRoof(roof, {
+        wallHeight: defaultWallHeight(home as Home, roof.level),
+        holes: extraHoles,
+        cutBelow: dormers.map((dormer) => ({ region: [closed(dormer.points)], surfaces: rawRoofModel(home, dormer).surfaces })),
+        clipUnder: main ? rawRoofModel(home, main).surfaces : undefined,
+      }),
+    )
+  }
+  return result
 }
 
 /** Kanten zwischen Flächen (First, Grat, Kehle, Knick) ohne die Ränder. */
@@ -561,6 +607,30 @@ export function roofAreas(model: RoofModel): { plan: number; true: number } {
 
 // ——— Vorlagen ———
 
+/** Dachformen in der Reihenfolge der Auswahl. */
+export const ROOF_SHAPES: RoofShape[] = ['gable', 'hip', 'halfHip', 'shed', 'flat', 'mansard', 'mansardHip', 'barrel']
+
+export type EdgeKind = 'eave' | 'gable' | 'halfHip'
+
+/** Art einer Kante nach ihrem Profil. */
+export function edgeKind(roof: Roof, edge: RoofEdge | undefined): EdgeKind | 'custom' {
+  const profile = edgeProfile(roof, edge)
+  if (profile.length === 1) return profile[0].slope >= GABLE - 1e-6 ? 'gable' : 'eave'
+  if (profile.length === 2 && profile[0].slope >= GABLE - 1e-6) return 'halfHip'
+  return 'custom'
+}
+
+/** Profil für eine Kantenart; der Krüppelwalm beginnt bei 60 % der Firsthöhe. */
+export function profileFor(roof: Roof, kind: EdgeKind, ridgeHeight: number): RoofProfileStep[] | null {
+  if (kind === 'eave') return null
+  if (kind === 'gable') return [{ height: null, slope: GABLE }]
+  return [
+    { height: Math.max(20, Math.round(ridgeHeight * 0.6)), slope: GABLE },
+    { height: null, slope: roof.slope },
+  ]
+}
+
+
 function edgeLengths(points: Point[]): number[] {
   return points.map((a, i) => {
     const b = points[(i + 1) % points.length]
@@ -569,28 +639,29 @@ function edgeLengths(points: Point[]): number[] {
 }
 
 /**
- * Kanten, die bei einem Satteldach Giebel werden: kurze Enden zwischen zwei konvexen Ecken, die
- * nicht länger als ihre Nachbarn sind. Bei einem Quadrat die Kanten 1 und 3.
+ * Kanten, die bei einem Satteldach Giebel werden: Enden eines Firsts, also Kanten zwischen zwei
+ * konvexen Ecken, deren Fläche beim Walmdach ein Dreieck ist. Ist das bei allen so (Quadrat,
+ * Zeltdach), werden bei vier Ecken die Kanten 1 und 3 Giebel.
  */
 export function gableEdges(points: Point[]): Set<number> {
   const n = points.length
+  const result = new Set<number>()
+  if (n < 3) return result
   const ccw = signedArea(points) > 0
-  const lengths = edgeLengths(points)
   const convex = points.map((b, i) => {
     const a = points[(i + n - 1) % n]
     const c = points[(i + 1) % n]
     const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
     return ccw ? cross > 0 : cross < 0
   })
-  const result = new Set<number>()
-  for (let i = 0; i < n; i++) {
-    const prev = lengths[(i + n - 1) % n]
-    const next = lengths[(i + 1) % n]
-    if (convex[i] && convex[(i + 1) % n] && lengths[i] <= prev + 0.5 && lengths[i] <= next + 0.5 && lengths[i] < Math.max(prev, next) - 0.5) result.add(i)
-  }
-  if (result.size === 0 && n === 4) {
-    if (lengths[0] + lengths[2] >= lengths[1] + lengths[3]) [1, 3].forEach((i) => result.add(i))
-    else [0, 2].forEach((i) => result.add(i))
+  const skeleton = straightSkeleton([points], [points.map(() => [{ z: 0, d: 0, slope: Math.PI / 4 }])], 0)
+  const corners = new Map<number, number>()
+  for (const face of skeleton.faces) corners.set(face.edge, Math.max(corners.get(face.edge) ?? 0, face.polygon.length))
+  for (let i = 0; i < n; i++) if (convex[i] && convex[(i + 1) % n] && corners.get(i) === 3) result.add(i)
+  if (result.size === n && n === 4) {
+    const lengths = edgeLengths(points)
+    result.clear()
+    for (const i of lengths[0] + lengths[2] >= lengths[1] + lengths[3] ? [1, 3] : [0, 2]) result.add(i)
   }
   return result
 }
@@ -598,6 +669,7 @@ export function gableEdges(points: Point[]): Set<number> {
 /** Neue Kanten für eine Dachform; {@code ridge}: Firsthöhe des Walmdachs mit gleicher Neigung (für Profile). */
 export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | 'shape' | 'slope' | 'maxHeight' | 'parapet'> {
   const points = roof.points
+  // Die Neigung des Dachs bleibt, nur ein Flachdach hat keine (und bekommt beim Wechsel wieder eine)
   const slope = roof.slope >= MIN_SLOPE ? roof.slope : DEFAULT_ROOF_SLOPE
   const keep = (e: RoofEdge | undefined): RoofEdge => ({ profile: null, overhang: e?.overhang ?? null })
   const base = { shape, slope, maxHeight: null, parapet: shape === 'flat' ? roof.parapet : null }
@@ -629,11 +701,7 @@ export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | '
       const shallow = (30 * Math.PI) / 180
       const height = Math.round(Math.min(260, halfWidth * 0.35 * Math.tan(steep)))
       const profile: RoofProfileStep[] = [{ height, slope: steep }, { height: null, slope: shallow }]
-      return {
-        ...base,
-        slope: steep,
-        edges: points.map((_, i) => edge(i, shape === 'mansard' && gables.has(i) ? gable : profile)),
-      }
+      return { ...base, edges: points.map((_, i) => edge(i, shape === 'mansard' && gables.has(i) ? gable : profile)) }
     }
     case 'barrel': {
       // Kreisbogen vom Traufwinkel 60° bis fast waagrecht über die halbe Breite
@@ -647,7 +715,7 @@ export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | '
         const height = radius * (Math.cos(a1) - Math.cos(start))
         profile.push({ height: k === count - 1 ? null : Math.round(height * 10) / 10, slope: (a0 + a1) / 2 })
       }
-      return { ...base, slope: start, edges: points.map((_, i) => edge(i, gables.has(i) ? gable : profile)) }
+      return { ...base, edges: points.map((_, i) => edge(i, gables.has(i) ? gable : profile)) }
     }
   }
 }

@@ -1,9 +1,10 @@
 import { useTheme } from '@mui/material/styles'
 import { memo, useCallback, useMemo } from 'react'
-import { Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
+import { Arrow, Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import { argbToCss } from '../model/colors'
-import type { Compass, DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Wall } from '../model/home'
+import type { Compass, DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Roof, Wall } from '../model/home'
 import { dimensionLength, dimensionOffsetPoints, labelCorners, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
+import { edgeProfile, GABLE, roofModels, type RoofModel } from '../model/roofs'
 import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
 import { useResolvedRef } from '../storage/contents'
@@ -14,6 +15,10 @@ export interface PlanPreview {
   wall?: Wall
   /** Punkte des Raums, der gerade gezeichnet wird (inkl. Mauszeiger). */
   roomPoints?: Point[]
+  /** Punkte des Dachs, das gerade gezeichnet wird (inkl. Mauszeiger). */
+  roofPoints?: Point[]
+  /** Gaube, die gerade aufgezogen wird. */
+  dormer?: Point[]
   rubberBand?: [Point, Point]
   /** Maßlinie, die gerade gezeichnet wird. */
   dimensionLine?: DimensionLine
@@ -30,7 +35,91 @@ interface PlanRendererProps {
   preview: PlanPreview
   /** Wände der Ebene darunter, blass zur Orientierung. */
   wallsBelow?: Wall[]
+  /** Dächer tieferer Ebenen, die in diese Ebene reichen, mit der Linie 1 m über dem Boden (Kniestock). */
+  roofsBelow?: { roof: Roof; model: RoofModel; contour: [Point, Point][] }[]
 }
+
+const ROOF_INK = '#b0642a'
+const ROOF_INK_DARK = '#e3a05f'
+const degreesText = (radians: number) => `${Math.round((radians * 180) / Math.PI)}°`
+
+/**
+ * Dach im Plan: Umriss mit Überstand gestrichelt, First, Grate und Kehlen, Giebelkanten dick und je
+ * Fläche ein Pfeil die Neigung hinunter.
+ */
+const RoofPlanShape = memo(function RoofPlanShape({
+  roof,
+  model,
+  scale,
+  color,
+  selected,
+  selectedColor,
+  faint,
+  contour,
+}: {
+  roof: Roof
+  model: RoofModel
+  scale: number
+  color: string
+  selected: boolean
+  selectedColor: string
+  faint?: boolean
+  contour?: [Point, Point][]
+}) {
+  const stroke = selected ? selectedColor : color
+  const outer = model.outline[0]
+  if (!outer) return null
+  const gables = outer
+    .map((a, k) => ({ a, b: outer[(k + 1) % outer.length], edge: roof.edges[model.edgeIndex[k]] }))
+    .filter(({ edge }) => edgeProfile(roof, edge)[0].slope >= GABLE - 1e-6)
+  const arrows = faint
+    ? []
+    : model.surfaces
+        // Nur Flächen, die groß genug für Pfeil und Beschriftung sind; bei Tonnen- und Mansarddächern nur die steilste und die flachste je Kante
+        .filter((s) => s.slope > 0.01 && polygonArea(s.rings[0]) * scale * scale > 1600)
+        .filter((s, _, all) => {
+          const slopes = all.filter((o) => o.edge === s.edge).map((o) => o.slope)
+          return s.slope === Math.max(...slopes) || s.slope === Math.min(...slopes)
+        })
+        .map((s) => {
+          const [cx, cy] = polygonCentroid(s.rings[0])
+          const length = Math.max(50, 28 / scale)
+          // Pfeil die Fläche hinunter, also entgegen der Richtung nach oben
+          return { cx, cy, dx: -s.up[0] * length, dy: -s.up[1] * length, text: degreesText(s.slope) }
+        })
+  const fontSize = 10 / scale
+  return (
+    <Group listening={false} opacity={faint ? 0.5 : 1}>
+      {model.outline.map((ring, i) => (
+        <Line
+          key={`outline-${i}`}
+          points={flat(ring)}
+          closed
+          fill={faint ? undefined : `${color}14`}
+          stroke={stroke}
+          strokeWidth={(selected ? 2.5 : 1.2) / scale}
+          dash={[8 / scale, 4 / scale]}
+        />
+      ))}
+      {selected && model.wallLine.map((ring, i) => <Line key={`wall-${i}`} points={flat(ring)} closed stroke={stroke} strokeWidth={1 / scale} dash={[2 / scale, 3 / scale]} />)}
+      {model.lines.map(([a, b], i) => (
+        <Line key={`line-${i}`} points={[a[0], a[1], b[0], b[1]]} stroke={stroke} strokeWidth={(selected ? 2 : 1.2) / scale} />
+      ))}
+      {gables.map(({ a, b }, i) => (
+        <Line key={`gable-${i}`} points={[a[0], a[1], b[0], b[1]]} stroke={stroke} strokeWidth={4 / scale} lineCap="round" />
+      ))}
+      {contour?.map(([a, b], i) => (
+        <Line key={`contour-${i}`} points={[a[0], a[1], b[0], b[1]]} stroke={color} strokeWidth={2 / scale} dash={[10 / scale, 3 / scale, 2 / scale, 3 / scale]} />
+      ))}
+      {arrows.map(({ cx, cy, dx, dy, text }, i) => (
+        <Group key={`arrow-${i}`}>
+          <Arrow points={[cx - dx / 2, cy - dy / 2, cx + dx / 2, cy + dy / 2]} stroke={stroke} fill={stroke} strokeWidth={1.2 / scale} pointerLength={6 / scale} pointerWidth={5 / scale} />
+          <Text x={cx} y={cy} text={text} fontSize={fontSize} fill={stroke} align="center" width={60 / scale} offsetX={30 / scale} offsetY={-4 / scale} />
+        </Group>
+      ))}
+    </Group>
+  )
+})
 
 const flat = (points: Point[]) => points.flat()
 
@@ -265,7 +354,7 @@ function CompassRose({ compass, scale, color, paper }: { compass: Compass; scale
 }
 
 /** Zeichnet den Plan in Plankoordinaten (cm); Linienbreiten und Schrift bleiben am Bildschirm konstant. */
-export function PlanRenderer({ home, selection, view, width, height, preview, wallsBelow }: PlanRendererProps) {
+export function PlanRenderer({ home, selection, view, width, height, preview, wallsBelow, roofsBelow }: PlanRendererProps) {
   const theme = useTheme()
   const dark = theme.palette.mode === 'dark'
   const { scale } = view
@@ -279,6 +368,8 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
     return (wallsBelow ?? []).map((wall) => ({ id: wall.id, polygon: wallPolygon(wall, byId) }))
   }, [wallsBelow])
   const fontSize = 12 / scale
+  const roofInk = dark ? ROOF_INK_DARK : ROOF_INK
+  const models = useMemo(() => roofModels(home), [home])
 
   const wallShape = useCallback(
     (wall: Wall, polygon: Point[], isSelected: boolean, dashed = false) => (
@@ -345,6 +436,10 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
 
         {home.walls.map((wall) => wallShape(wall, wallPolygon(wall, wallsById), selected.has(wall.id)))}
 
+        {roofsBelow?.map(({ roof, model, contour }) => (
+          <RoofPlanShape key={`below-${roof.id}`} roof={roof} model={model} scale={scale} color={roofInk} selected={false} selectedColor={selectedColor} faint contour={contour} />
+        ))}
+
         {home.furniture
           .filter((p) => p.visible)
           .map((piece) => (
@@ -358,6 +453,13 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
             />
           ))}
 
+        {home.roofs
+          .filter((roof) => roof.visible || selected.has(roof.id))
+          .map((roof) => {
+            const model = models.get(roof.id)
+            return model && <RoofPlanShape key={roof.id} roof={roof} model={model} scale={scale} color={roofInk} selected={selected.has(roof.id)} selectedColor={selectedColor} />
+          })}
+
         {home.dimensionLines.map((line) => (
           <DimensionShape key={line.id} line={line} scale={scale} color={selected.has(line.id) ? selectedColor : ink} />
         ))}
@@ -367,7 +469,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         ))}
       </>
     ),
-    [below, home.rooms, home.walls, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink],
+    [below, home.rooms, home.walls, home.roofs, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink, models, roofInk, roofsBelow],
   )
 
   return (
@@ -400,16 +502,30 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         />
       )}
 
-      {handlePoints(home, selection).map(({ handle, point }) => (
+      {preview.roofPoints && preview.roofPoints.length > 1 && (
+        <Line
+          points={flat(preview.roofPoints)}
+          closed={preview.roofPoints.length > 2}
+          fill={`${roofInk}22`}
+          stroke={roofInk}
+          strokeWidth={2 / scale}
+          dash={[6 / scale, 4 / scale]}
+          listening={false}
+        />
+      )}
+
+      {preview.dormer && <Line points={flat(preview.dormer)} closed fill={`${roofInk}33`} stroke={selectedColor} strokeWidth={2 / scale} dash={[6 / scale, 4 / scale]} listening={false} />}
+
+      {handlePoints(home, selection).map(({ handle, point }, i) => (
         <Rect
-          key={handle.kind}
+          key={`${handle.kind}-${i}`}
           x={point[0]}
           y={point[1]}
           width={10 / scale}
           height={10 / scale}
           offsetX={5 / scale}
           offsetY={5 / scale}
-          cornerRadius={handle.kind === 'rotate' ? 5 / scale : 0}
+          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' ? 5 / scale : 0}
           fill={theme.palette.background.paper}
           stroke={selectedColor}
           strokeWidth={2 / scale}

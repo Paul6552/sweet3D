@@ -5,6 +5,7 @@ import GridGoldenratio from '@mui/icons-material/GridGoldenratio'
 import HighlightAlt from '@mui/icons-material/HighlightAlt'
 import PanToolOutlined from '@mui/icons-material/PanToolOutlined'
 import Polyline from '@mui/icons-material/Polyline'
+import Roofing from '@mui/icons-material/Roofing'
 import Straighten from '@mui/icons-material/Straighten'
 import TextFields from '@mui/icons-material/TextFields'
 import ZoomIn from '@mui/icons-material/ZoomIn'
@@ -24,6 +25,7 @@ import { useEditorStore } from '../store/editorStore'
 import { PanelToolbar } from '../editor/PanelFrame'
 import { LevelTabs } from './LevelTabs'
 import { PlanCanvas } from './PlanCanvas'
+import { RoofShapeBar } from './RoofShapeBar'
 import { usePlanStore, zoomAt, type PlanMode } from './planStore'
 
 const MODES: { mode: PlanMode; icon: React.ReactNode; key: string }[] = [
@@ -31,6 +33,7 @@ const MODES: { mode: PlanMode; icon: React.ReactNode; key: string }[] = [
   { mode: 'pan', icon: <PanToolOutlined fontSize="small" />, key: 'H' },
   { mode: 'wall', icon: <Polyline fontSize="small" />, key: 'W' },
   { mode: 'room', icon: <FormatShapes fontSize="small" />, key: 'R' },
+  { mode: 'roof', icon: <Roofing fontSize="small" />, key: 'D' },
   { mode: 'dimension', icon: <Straighten fontSize="small" />, key: 'M' },
   { mode: 'label', icon: <TextFields fontSize="small" />, key: 'T' },
 ]
@@ -115,6 +118,7 @@ export function PlanPanel() {
       <LevelTabs />
       <Box ref={areaRef} sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <PlanCanvas onStatus={onStatus} />
+        <RoofShapeBar />
       </Box>
       <Box sx={{ display: 'flex', gap: 2, px: 1, py: 0.25, borderTop: 1, borderColor: 'divider', color: 'text.secondary' }}>
         <Typography variant="caption" noWrap sx={{ flex: 1 }}>

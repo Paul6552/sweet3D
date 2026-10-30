@@ -22,7 +22,7 @@ export function useShortcuts() {
       } else if (mod && key === 'a' && home) {
         event.preventDefault()
         const level = homeOnLevel(home)
-        dispatch({ type: 'select', ids: [...level.walls, ...level.rooms, ...level.furniture.filter((p) => p.visible), ...level.dimensionLines, ...level.labels].map((i) => i.id) })
+        dispatch({ type: 'select', ids: [...level.walls, ...level.rooms, ...level.roofs, ...level.furniture.filter((p) => p.visible), ...level.dimensionLines, ...level.labels].map((i) => i.id) })
       } else if (mod && (key === 'c' || key === 'x') && home && selection.length > 0) {
         event.preventDefault()
         copySelection(home, selection)

@@ -12,8 +12,8 @@ const rect = (w: number, l: number): Point[] => [
 ]
 
 function roof(points: Point[], changes: Partial<Roof> = {}): Roof {
-  const base = createRoof(points, null, 'gable')
-  return { ...base, slope: deg(40), overhang: 50, thickness: 20, ...changes, ...shapeEdges({ ...base, slope: deg(40), ...changes }, changes.shape ?? 'gable') }
+  const base: Roof = { ...createRoof(points, null, 'gable'), slope: deg(40), overhang: 50, thickness: 20, ...changes }
+  return { ...base, ...shapeEdges(base, changes.shape ?? 'gable') }
 }
 
 const planArea = (model: RoofModel) => roofAreas(model).plan
@@ -61,6 +61,23 @@ describe('computeRoof', () => {
         const area = points.length === 4 ? 800 * 1200 : 1200 * 600 + 600 * 800
         expect(planArea(model), `${shape} auf ${points.length} Ecken`).toBeCloseTo(area, -1)
       }
+    }
+  })
+
+  it('Satteldach auf L-Form mit kurzem Flügel und Überstand', () => {
+    const short: Point[] = [
+      [0, 0],
+      [1600, 0],
+      [1600, 600],
+      [720, 600],
+      [720, 1000],
+      [0, 1000],
+    ]
+    for (const overhang of [0, 40]) {
+      const model = computeRoof(roof(short, { shape: 'gable', overhang, thickness: 25, slope: deg(35) }), { wallHeight: 250 })
+      const o = overhang
+      const area = (1600 + 2 * o) * (600 + 2 * o) + (720 + 2 * o) * (400)
+      expect(planArea(model), `Überstand ${o}`).toBeCloseTo(area, -1)
     }
   })
 
@@ -117,5 +134,16 @@ describe('Hilfsfunktionen', () => {
       [0, 1400],
     ]
     expect([...gableEdges(l)].sort()).toEqual([1, 4])
+    // Kurzer Flügel: auch sein Ende wird Giebel
+    const short: Point[] = [
+      [0, 0],
+      [1600, 0],
+      [1600, 600],
+      [720, 600],
+      [720, 1000],
+      [0, 1000],
+    ]
+    expect([...gableEdges(short)].sort()).toEqual([1, 4])
+    expect([...gableEdges(rect(1000, 1000))].sort()).toEqual([1, 3])
   })
 })

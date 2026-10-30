@@ -142,6 +142,7 @@ function usedTextures(home: Home): TextureRef[] {
   const all = [
     ...home.walls.flatMap((w) => [w.leftSide?.texture, w.rightSide?.texture]),
     ...home.rooms.flatMap((r) => [r.floor?.texture, r.ceiling?.texture]),
+    ...home.roofs.flatMap((r) => [r.top?.texture, r.underside?.texture, r.sides?.texture]),
     ...home.furniture.map((p) => p.texture),
   ].filter((texture): texture is TextureRef => !!texture)
   return [...new Map(all.map((texture) => [texture.image, texture])).values()]

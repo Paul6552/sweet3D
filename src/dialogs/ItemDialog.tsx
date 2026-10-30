@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import type { HomeCommand } from '../model/commands'
 import { dimensionLength } from '../model/geometry'
 import type { DimensionLine, HomePiece, Room, Wall } from '../model/home'
+import { useRoofFields } from './RoofFields'
 import { executeCommand, useEditorStore } from '../store/editorStore'
 import { collectChanges, DEFAULT_SURFACE, degrees, useCheckField, useNumberField, useSurfaceField, useTextField, show, wide } from './fields'
 import { Grid } from './layout'
@@ -61,6 +62,7 @@ function useWallFields(walls: Wall[]) {
       placeholder: String(wallHeight),
     }),
   ]
+  const toRoof = useCheckField(walls, t('roof.toRoof'), (w) => w.toRoof ?? false, (c, v) => (c.toRoof = v))
   const sides = [
     useSurfaceField(walls, t('dialogs.surface.leftSide'), (w) => w.leftSide ?? DEFAULT_SURFACE, (c, s) => (c.leftSide = s)),
     useSurfaceField(walls, t('dialogs.surface.rightSide'), (w) => w.rightSide ?? DEFAULT_SURFACE, (c, s) => (c.rightSide = s)),
@@ -68,10 +70,11 @@ function useWallFields(walls: Wall[]) {
   const node = (
     <Grid>
       {show(main)}
+      {toRoof.node}
       {wide(sides)}
     </Grid>
   )
-  return { fields: [...main, ...sides], node }
+  return { fields: [...main, toRoof, ...sides], node }
 }
 
 function useRoomFields(rooms: Room[]) {
@@ -121,6 +124,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
       furniture: pick(home.furniture),
       walls: pick(home.walls),
       rooms: pick(home.rooms),
+      roofs: pick(home.roofs),
       labels: pick(home.labels),
       dimensionLines: pick(home.dimensionLines),
     }
@@ -128,6 +132,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
   const pieces = usePieceFields(items.furniture)
   const walls = useWallFields(items.walls)
   const rooms = useRoomFields(items.rooms)
+  const roofs = useRoofFields(items.roofs)
   const labels = useLabelFields(items.labels)
   const dimensions = useDimensionFields(items.dimensionLines)
 
@@ -135,6 +140,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
     { key: 'furniture', items: items.furniture, ...pieces, title: t('dialogs.titles.furniture') },
     { key: 'walls', items: items.walls, ...walls, title: t('dialogs.titles.walls') },
     { key: 'rooms', items: items.rooms, ...rooms, title: t('dialogs.titles.rooms') },
+    { key: 'roofs', items: items.roofs, ...roofs, title: t('dialogs.titles.roofs') },
     { key: 'labels', items: items.labels, ...labels, title: t('dialogs.titles.labels') },
     { key: 'dimensionLines', items: items.dimensionLines, ...dimensions, title: t('dialogs.titles.dimensionLines') },
   ].filter((s) => s.items.length > 0)
@@ -146,6 +152,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
       { type: 'updateFurniture', changes: collectChanges(items.furniture, pieces.fields) },
       { type: 'updateWalls', changes: collectChanges(items.walls, walls.fields) },
       { type: 'updateRooms', changes: collectChanges(items.rooms, rooms.fields) },
+      { type: 'updateRoofs', changes: collectChanges(items.roofs, roofs.fields) },
       { type: 'updateLabels', changes: collectChanges(items.labels, labels.fields) },
       { type: 'updateDimensionLines', changes: collectChanges(items.dimensionLines, dimensions.fields) },
     ]

@@ -78,6 +78,11 @@ export function usedLibraryIds(home: Home): Set<string> {
     add(room.floor?.texture?.libraryId)
     add(room.ceiling?.texture?.libraryId)
   }
+  for (const roof of home.roofs ?? []) {
+    add(roof.top?.texture?.libraryId)
+    add(roof.underside?.texture?.libraryId)
+    add(roof.sides?.texture?.libraryId)
+  }
   return ids
 }
 

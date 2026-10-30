@@ -1,4 +1,4 @@
-import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Room, type Wall } from './home'
+import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
 import { sortLevels } from './levels'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
@@ -8,9 +8,10 @@ type Change<T extends { id: string }> = Partial<T> & { id: string }
  * per BroadcastChannel an das Editor-Hauptfenster schicken können.
  */
 export type HomeCommand =
-  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; furniture?: HomePiece[]; dimensionLines?: DimensionLine[]; labels?: Label[] }
+  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; roofs?: Roof[]; furniture?: HomePiece[]; dimensionLines?: DimensionLine[]; labels?: Label[] }
   | { type: 'updateWalls'; changes: Change<Wall>[] }
   | { type: 'updateRooms'; changes: Change<Room>[] }
+  | { type: 'updateRoofs'; changes: Change<Roof>[] }
   | { type: 'updateFurniture'; changes: Change<HomePiece>[] }
   | { type: 'updateDimensionLines'; changes: Change<DimensionLine>[] }
   | { type: 'updateLabels'; changes: Change<Label>[] }
@@ -43,6 +44,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       const level = home.selectedLevel
       home.walls.push(...(command.walls ?? []).map((w) => ({ ...w, level })))
       home.rooms.push(...(command.rooms ?? []).map((r) => ({ ...r, level })))
+      home.roofs.push(...(command.roofs ?? []).map((r) => ({ ...r, level })))
       home.furniture.push(...(command.furniture ?? []).map((p) => ({ ...p, level })))
       home.dimensionLines.push(...(command.dimensionLines ?? []).map((d) => ({ ...d, level })))
       home.labels.push(...(command.labels ?? []).map((l) => ({ ...l, level })))
@@ -80,6 +82,9 @@ export function applyCommand(home: Home, command: HomeCommand): void {
     case 'updateRooms':
       applyChanges(home.rooms, command.changes)
       break
+    case 'updateRoofs':
+      applyChanges(home.roofs, command.changes)
+      break
     case 'updateFurniture':
       applyChanges(home.furniture, command.changes)
       break
@@ -94,8 +99,25 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       break
     case 'deleteItems': {
       const ids = new Set(command.ids)
+      // Mit einer Gaube gehen ihre Wände, mit einem Hauptdach seine Gauben
+      for (let changed = true; changed; ) {
+        changed = false
+        for (const roof of home.roofs) {
+          if (roof.dormer && ids.has(roof.dormer.roofId) && !ids.has(roof.id)) {
+            ids.add(roof.id)
+            changed = true
+          }
+          if (roof.dormer && ids.has(roof.id)) for (const id of roof.dormer.wallIds) if (!ids.has(id)) {
+            ids.add(id)
+            changed = true
+          }
+        }
+      }
       home.walls = home.walls.filter((w) => !ids.has(w.id))
       home.rooms = home.rooms.filter((r) => !ids.has(r.id))
+      home.roofs = home.roofs.filter((r) => !ids.has(r.id))
+      // Dachfenster gelöschter Dächer bleiben als normale Fenster
+      for (const piece of home.furniture) if (piece.roofId && ids.has(piece.roofId)) piece.roofId = null
       home.furniture = home.furniture.filter((p) => !ids.has(p.id))
       home.dimensionLines = home.dimensionLines.filter((d) => !ids.has(d.id))
       home.labels = home.labels.filter((l) => !ids.has(l.id))
@@ -119,7 +141,16 @@ export function applyCommand(home: Home, command: HomeCommand): void {
  * Verschiebt Objekte. Wie in Sweet Home 3D werden die Enden nicht verschobener Wände,
  * die an verschobenen Wänden hängen, mitgezogen, damit die Ecken verbunden bleiben.
  */
-function moveItems(home: Home, ids: Set<string>, dx: number, dy: number): void {
+function moveItems(home: Home, moved: Set<string>, dx: number, dy: number): void {
+  // Gauben nehmen ihre Wände mit, Dächer ihre Gauben und Dachfenster
+  const ids = new Set(moved)
+  for (const roof of home.roofs) {
+    if (roof.dormer && ids.has(roof.dormer.roofId)) ids.add(roof.id)
+  }
+  for (const roof of home.roofs) {
+    if (roof.dormer && ids.has(roof.id)) roof.dormer.wallIds.forEach((id) => ids.add(id))
+  }
+  for (const piece of home.furniture) if (piece.roofId && ids.has(piece.roofId)) ids.add(piece.id)
   const byId = new Map(home.walls.map((w) => [w.id, w]))
   for (const wall of home.walls) {
     if (!ids.has(wall.id)) continue
@@ -143,6 +174,11 @@ function moveItems(home: Home, ids: Set<string>, dx: number, dy: number): void {
   }
   for (const room of home.rooms) {
     if (ids.has(room.id)) room.points = room.points.map(([x, y]) => [x + dx, y + dy])
+  }
+  for (const roof of home.roofs) {
+    if (!ids.has(roof.id)) continue
+    roof.points = roof.points.map(([x, y]) => [x + dx, y + dy])
+    roof.holes = roof.holes.map((hole) => hole.map(([x, y]) => [x + dx, y + dy]))
   }
   for (const item of [...home.furniture, ...home.labels]) {
     if (ids.has(item.id)) {

@@ -1,5 +1,5 @@
 import type { HomeCommand } from '../model/commands'
-import { newId, type DimensionLine, type Home, type HomePiece, type Label, type Room, type Wall } from '../model/home'
+import { newId, type DimensionLine, type Home, type HomePiece, type Label, type Roof, type Room, type Wall } from '../model/home'
 
 const CLIPBOARD_KEY = 'sweet3d.clipboard'
 const PASTE_OFFSET = 20
@@ -7,6 +7,7 @@ const PASTE_OFFSET = 20
 interface ClipboardContent {
   walls: Wall[]
   rooms: Room[]
+  roofs?: Roof[]
   furniture: HomePiece[]
   dimensionLines?: DimensionLine[]
   labels?: Label[]
@@ -18,6 +19,7 @@ export function copySelection(home: Home, selection: string[]): void {
   const content: ClipboardContent = {
     walls: home.walls.filter((w) => ids.has(w.id)),
     rooms: home.rooms.filter((r) => ids.has(r.id)),
+    roofs: home.roofs.filter((r) => ids.has(r.id)),
     furniture: home.furniture.filter((p) => ids.has(p.id)),
     dimensionLines: home.dimensionLines.filter((d) => ids.has(d.id)),
     labels: home.labels.filter((l) => ids.has(l.id)),
@@ -49,7 +51,8 @@ export function pasteCommand(): { command: HomeCommand; ids: string[] } | null {
     yEnd: d.yEnd + PASTE_OFFSET,
   }))
   const labels = (content?.labels ?? []).map((l) => ({ ...l, id: newId('label'), x: l.x + PASTE_OFFSET, y: l.y + PASTE_OFFSET }))
-  if (!content || content.walls.length + content.rooms.length + content.furniture.length + dimensionLines.length + labels.length === 0) return null
+  const roofCount = content?.roofs?.length ?? 0
+  if (!content || content.walls.length + content.rooms.length + roofCount + content.furniture.length + dimensionLines.length + labels.length === 0) return null
   const wallIds = new Map(content.walls.map((w) => [w.id, newId('wall')]))
   const walls = content.walls.map((w) => ({
     ...w,
@@ -66,9 +69,27 @@ export function pasteCommand(): { command: HomeCommand; ids: string[] } | null {
     id: newId('room'),
     points: r.points.map(([x, y]) => [x + PASTE_OFFSET, y + PASTE_OFFSET] as [number, number]),
   }))
-  const furniture = content.furniture.map((p) => ({ ...p, id: newId('piece'), x: p.x + PASTE_OFFSET, y: p.y + PASTE_OFFSET }))
+  const roofIds = new Map((content.roofs ?? []).map((r) => [r.id, newId('roof')]))
+  const shift = (points: [number, number][]) => points.map(([x, y]) => [x + PASTE_OFFSET, y + PASTE_OFFSET] as [number, number])
+  const roofs = (content.roofs ?? []).map((r) => ({
+    ...r,
+    id: roofIds.get(r.id)!,
+    points: shift(r.points),
+    holes: r.holes.map(shift),
+    // Gauben behalten ihr Hauptdach nur, wenn es mitkopiert wurde, und ihre Wände, soweit kopiert
+    dormer: r.dormer && roofIds.has(r.dormer.roofId)
+      ? { roofId: roofIds.get(r.dormer.roofId)!, wallIds: r.dormer.wallIds.filter((id) => wallIds.has(id)).map((id) => wallIds.get(id)!) }
+      : null,
+  }))
+  const furniture = content.furniture.map((p) => ({
+    ...p,
+    id: newId('piece'),
+    x: p.x + PASTE_OFFSET,
+    y: p.y + PASTE_OFFSET,
+    roofId: p.roofId ? (roofIds.get(p.roofId) ?? null) : p.roofId,
+  }))
   return {
-    command: { type: 'addItems', walls, rooms, furniture, dimensionLines, labels },
-    ids: [...walls, ...rooms, ...furniture, ...dimensionLines, ...labels].map((i) => i.id),
+    command: { type: 'addItems', walls, rooms, roofs, furniture, dimensionLines, labels },
+    ids: [...walls, ...rooms, ...roofs, ...furniture, ...dimensionLines, ...labels].map((i) => i.id),
   }
 }

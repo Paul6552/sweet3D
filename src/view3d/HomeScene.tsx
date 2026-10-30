@@ -6,7 +6,7 @@ import { useCatalogStore } from '../catalog/catalogStore'
 import type { Home, HomePiece, Roof, Wall } from '../model/home'
 import { wallPolygon } from '../model/geometry'
 import { defaultWallHeight, findLevel, levelElevation, levelsAbove, visibleLevels } from '../model/levels'
-import { rawRoofModel, roofHeightAt, roofModels, wallCaps, type RoofModel } from '../model/roofs'
+import { rawRoofModel, roofHeightAt, roofModels, skylightHole, wallCaps, type RoofModel } from '../model/roofs'
 import { dispatch } from '../store/editorStore'
 import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
@@ -96,10 +96,17 @@ export const HomeScene = memo(function HomeScene({ home, selection, selectionCol
       roofModels(home, (roof) => {
         const raw = rawRoofModel(home, roof)
         const elevation = levelElevation(home, roof.level)
-        return staircaseHoles(home, elevation + raw.eave - 1000, elevation + raw.ridge, staircaseShapeOf, (piece, _, top) => {
+        const stairs = staircaseHoles(home, elevation + raw.eave - 1000, elevation + raw.ridge, staircaseShapeOf, (piece, _, top) => {
           const under = roofHeightAt(raw, [piece.x, piece.y], 'bottom')
           return under !== null && top > elevation + under
         })
+        const skylights = home.furniture
+          .filter((p) => p.roofId === roof.id && p.visible)
+          .map((p): Polygon => {
+            const ring = skylightHole(p)
+            return [[...ring, ring[0]]]
+          })
+        return [...stairs, ...skylights]
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- nur Dächer, Möbel und Höhen zählen
     [home.roofs, home.furniture, home.levels, home.wallHeight, staircaseShapeOf],
@@ -181,7 +188,8 @@ function LevelScene({
   const level = findLevel(home, levelId)
   const floorThickness = level && level.elevation > home.levels[0].elevation ? level.floorThickness : 0
   const wallsById = useMemo(() => new Map(levelWalls.map((w) => [w.id, w])), [levelWalls])
-  const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow), [levelFurniture])
+  // Dachfenster schneiden das Dach, nicht die Wände
+  const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow && !p.roofId), [levelFurniture])
   const walls = useMemo(
     () =>
       levelWalls.map((wall) => {

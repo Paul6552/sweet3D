@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Matrix4, Mesh, Vector3, type Material, type Object3D } from 'three'
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { argbToCss } from '../model/colors'
+import { pitchedSize } from '../model/geometry'
 import type { HomePiece, LightInfo } from '../model/home'
 import { CANDELA_PER_POWER } from './indoorLight'
 import { surfaceMaterial } from './materials'
@@ -54,28 +55,35 @@ export function PieceModel({ piece, selected, selectionColor, lightShadows, onSe
       if (child instanceof Mesh) child.castShadow = false
     })
   }, [object, isLight])
+  // Geneigt (Dachfenster): um die Mitte gedreht, die Unterkante bleibt auf elevation; lokal −y kippt nach oben
+  const pitch = piece.pitch ?? 0
+  const pitchedHeight = pitchedSize(piece).height
   return (
     <group
       position={[piece.x, piece.elevation, piece.y]}
       rotation-y={-piece.angle}
       onClick={(event) => onSelect(event, piece.id)}
     >
-      {object ? (
-        <primitive object={object} />
-      ) : (
-        // Platzhalter, solange das Modell lädt bzw. wenn es fehlt
-        <mesh position-y={height / 2}>
-          <boxGeometry args={[width, height, depth]} />
-          <meshStandardMaterial color={failed ? '#e0702b' : '#b0b0b0'} transparent opacity={failed ? 0.7 : 0.5} />
-        </mesh>
-      )}
-      {piece.light && <PieceLights light={piece.light} width={width} depth={depth} height={height} shadows={lightShadows} />}
-      {selected && (
-        <lineSegments position-y={height / 2} raycast={() => null}>
-          <edgesGeometry args={[new BoxGeometry(width + 2, height + 2, depth + 2)]} />
-          <lineBasicMaterial color={selectionColor} />
-        </lineSegments>
-      )}
+      <group position-y={pitch ? pitchedHeight / 2 : 0} rotation-x={-pitch}>
+        <group position-y={pitch ? -height / 2 : 0}>
+          {object ? (
+            <primitive object={object} />
+          ) : (
+            // Platzhalter, solange das Modell lädt bzw. wenn es fehlt
+            <mesh position-y={height / 2}>
+              <boxGeometry args={[width, height, depth]} />
+              <meshStandardMaterial color={failed ? '#e0702b' : '#b0b0b0'} transparent opacity={failed ? 0.7 : 0.5} />
+            </mesh>
+          )}
+          {piece.light && <PieceLights light={piece.light} width={width} depth={depth} height={height} shadows={lightShadows} />}
+          {selected && (
+            <lineSegments position-y={height / 2} raycast={() => null}>
+              <edgesGeometry args={[new BoxGeometry(width + 2, height + 2, depth + 2)]} />
+              <lineBasicMaterial color={selectionColor} />
+            </lineSegments>
+          )}
+        </group>
+      </group>
     </group>
   )
 }

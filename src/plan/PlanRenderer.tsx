@@ -3,7 +3,7 @@ import { memo, useCallback, useMemo } from 'react'
 import { Arrow, Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import { argbToCss } from '../model/colors'
 import type { Compass, DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Roof, Wall } from '../model/home'
-import { dimensionLength, dimensionOffsetPoints, labelCorners, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
+import { dimensionLength, dimensionOffsetPoints, labelCorners, pitchedSize, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { edgeProfile, GABLE, roofModels, type RoofModel } from '../model/roofs'
 import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
@@ -178,8 +178,12 @@ function Grid({ view, width, height, minor, major }: { view: PlanView; width: nu
 }
 
 const PieceShape = memo(function PieceShape({ piece, scale, stroke, selected, selectedColor }: { piece: HomePiece; scale: number; stroke: string; selected: boolean; selectedColor: string }) {
-  const image = useImage(useResolvedRef(piece.planIcon ?? piece.icon))
-  const { width: w, depth: d } = piece
+  // Dachfenster liegen geneigt: Grundriss in voller Tiefe, statt Symbol und Öffnungsbogen nur Rahmen und Glas
+  const pitched = !!piece.pitch
+  const image = useImage(useResolvedRef(pitched ? null : (piece.planIcon ?? piece.icon)))
+  const w = piece.width
+  const d = pitchedSize(piece).depth
+  const inset = Math.min(w, d) * 0.12
   // Symbol wie in Sweet Home 3D mit erhaltenem Seitenverhältnis einpassen
   const fit = image ? Math.min(w / image.width, d / image.height) : 0
   const iw = image ? image.width * fit : 0
@@ -187,29 +191,31 @@ const PieceShape = memo(function PieceShape({ piece, scale, stroke, selected, se
   return (
     <Group x={piece.x} y={piece.y} rotation={(piece.angle * 180) / Math.PI} listening={false}>
       {image && <Image image={image} x={-iw / 2} y={-ih / 2} width={iw} height={ih} opacity={0.9} />}
-      {piece.doorOrWindowInfo?.sashes.map((sash, i) => (
-        <Shape
-          key={i}
-          sceneFunc={(ctx, shape) => {
-            // Öffnungsbogen eines Flügels; die Achse liegt relativ zur linken Rückseite.
-            // Winkel wie bei Java2D gegen den Uhrzeigersinn, daher für das Canvas (y nach unten) negiert
-            const ax = -w / 2 + sash.xAxis * w
-            const ay = -d / 2 + sash.yAxis * d
-            const r = sash.width * w
-            const start = -sash.startAngle
-            const end = -sash.endAngle
-            ctx.beginPath()
-            ctx.moveTo(ax, ay)
-            ctx.lineTo(ax + Math.cos(start) * r, ay + Math.sin(start) * r)
-            ctx.arc(ax, ay, r, start, end, end < start)
-            ctx.closePath()
-            ctx.strokeShape(shape)
-          }}
-          stroke={stroke}
-          strokeWidth={1 / scale}
-          dash={[4 / scale, 3 / scale]}
-        />
-      ))}
+      {pitched && <Rect x={-w / 2 + inset} y={-d / 2 + inset} width={w - 2 * inset} height={d - 2 * inset} stroke={stroke} strokeWidth={1 / scale} />}
+      {!pitched &&
+        piece.doorOrWindowInfo?.sashes.map((sash, i) => (
+          <Shape
+            key={i}
+            sceneFunc={(ctx, shape) => {
+              // Öffnungsbogen eines Flügels; die Achse liegt relativ zur linken Rückseite.
+              // Winkel wie bei Java2D gegen den Uhrzeigersinn, daher für das Canvas (y nach unten) negiert
+              const ax = -w / 2 + sash.xAxis * w
+              const ay = -d / 2 + sash.yAxis * d
+              const r = sash.width * w
+              const start = -sash.startAngle
+              const end = -sash.endAngle
+              ctx.beginPath()
+              ctx.moveTo(ax, ay)
+              ctx.lineTo(ax + Math.cos(start) * r, ay + Math.sin(start) * r)
+              ctx.arc(ax, ay, r, start, end, end < start)
+              ctx.closePath()
+              ctx.strokeShape(shape)
+            }}
+            stroke={stroke}
+            strokeWidth={1 / scale}
+            dash={[4 / scale, 3 / scale]}
+          />
+        ))}
       <Rect
         x={-w / 2}
         y={-d / 2}

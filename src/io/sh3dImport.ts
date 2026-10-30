@@ -21,7 +21,7 @@ import {
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
-import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
+import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -211,6 +211,8 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       light: e.nodeName === 'light' ? lightInfo(e) : null,
       staircaseCutOutShape: e.getAttribute('staircaseCutOutShape') ?? catalogPiece?.staircaseCutOutShape ?? null,
       ...(libraryId && { libraryId }),
+      ...(num(e, 'pitch') && { pitch: num(e, 'pitch')! }),
+      ...(property(e, ROOF_ID_PROPERTY) && { roofId: property(e, ROOF_ID_PROPERTY) }),
       level,
     }
     home.furniture.push(piece)

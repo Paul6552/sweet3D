@@ -22,6 +22,8 @@ export const TEXTURE_EXTRAS_PROPERTY = 'sweet3d.textureExtras'
 export const ROOF_PROPERTY = 'sweet3d.roof'
 /** Wand, deren Oberkante dem Dach folgt. */
 export const TO_ROOF_PROPERTY = 'sweet3d.toRoof'
+/** Dach, in dem ein Dachfenster sitzt. */
+export const ROOF_ID_PROPERTY = 'sweet3d.roofId'
 
 export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
 
@@ -301,6 +303,7 @@ async function pieceXml(
     y: piece.y,
     elevation: piece.elevation,
     angle: piece.angle,
+    pitch: piece.pitch || null,
     width: piece.width,
     depth: piece.depth,
     height: piece.height,
@@ -327,6 +330,7 @@ async function pieceXml(
       (source) => `    ${element('lightSource', { x: source.x, y: source.y, z: source.z, color: formatArgb(source.color & 0xffffff), diameter: source.diameter || null })}`,
     ),
     ...(piece.libraryId ? [`    ${element('property', { name: LIBRARY_ID_PROPERTY, value: piece.libraryId })}`] : []),
+    ...(piece.roofId ? [`    ${element('property', { name: ROOF_ID_PROPERTY, value: piece.roofId })}`] : []),
     ...texture,
   ]
   return children.length === 0 ? element(name, attributes) : [`${openTag(name, attributes)}>`, ...children, `  </${name}>`].join('\n')

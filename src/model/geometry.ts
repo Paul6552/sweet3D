@@ -75,15 +75,29 @@ export function wallPolygon(wall: Wall, wallsById: Map<string, Wall>): Point[] {
 }
 
 /** Die vier Ecken eines Möbels im Plan, beginnend links oben (im Uhrzeigersinn). */
-export function pieceCorners(piece: Pick<HomePiece, 'x' | 'y' | 'width' | 'depth' | 'angle'>): Point[] {
+/**
+ * Tiefe im Plan und Höhe eines um {@code pitch} (um die Breitenachse) geneigten Möbels, z. B. eines
+ * Dachfensters; Breite, Tiefe und Höhe des Möbels gelten wie in Sweet Home 3D vor der Neigung.
+ */
+export function pitchedSize(piece: Pick<HomePiece, 'depth'> & Partial<Pick<HomePiece, 'height' | 'pitch'>>): { depth: number; height: number } {
+  const pitch = piece.pitch ?? 0
+  const height = piece.height ?? 0
+  if (!pitch) return { depth: piece.depth, height }
+  const cos = Math.abs(Math.cos(pitch))
+  const sin = Math.abs(Math.sin(pitch))
+  return { depth: piece.depth * cos + height * sin, height: height * cos + piece.depth * sin }
+}
+
+export function pieceCorners(piece: Pick<HomePiece, 'x' | 'y' | 'width' | 'depth' | 'angle'> & Partial<Pick<HomePiece, 'height' | 'pitch'>>): Point[] {
   const cos = Math.cos(piece.angle)
   const sin = Math.sin(piece.angle)
+  const { depth } = pitchedSize(piece)
   return (
     [
-      [-piece.width / 2, -piece.depth / 2],
-      [piece.width / 2, -piece.depth / 2],
-      [piece.width / 2, piece.depth / 2],
-      [-piece.width / 2, piece.depth / 2],
+      [-piece.width / 2, -depth / 2],
+      [piece.width / 2, -depth / 2],
+      [piece.width / 2, depth / 2],
+      [-piece.width / 2, depth / 2],
     ] as Point[]
   ).map(([x, y]) => [piece.x + x * cos - y * sin, piece.y + x * sin + y * cos])
 }

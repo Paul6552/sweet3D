@@ -1,5 +1,6 @@
 import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
 import { sortLevels } from './levels'
+import { refitSkylights } from './roofs'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
 
@@ -84,6 +85,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       break
     case 'updateRoofs':
       applyChanges(home.roofs, command.changes)
+      refitSkylights(home, new Set(command.changes.map((c) => c.id)))
       break
     case 'updateFurniture':
       applyChanges(home.furniture, command.changes)

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Point } from './geometry'
 import type { Roof } from './home'
-import { cleanRing, computeRoof, createRoof, gableEdges, roofAreas, roofHeightAt, roofHeightsAlong, shapeEdges, type RoofModel } from './roofs'
+import { cleanRing, computeRoof, createRoof, gableEdges, roofAreas, roofHeightAt, roofHeightsAlong, shapeEdges, skylightHole, skylightPlacement, type RoofModel } from './roofs'
+import { polygonArea } from './geometry'
 
 const deg = (d: number) => (d * Math.PI) / 180
 const rect = (w: number, l: number): Point[] => [
@@ -145,5 +146,32 @@ describe('Hilfsfunktionen', () => {
     ]
     expect([...gableEdges(short)].sort()).toEqual([1, 4])
     expect([...gableEdges(rect(1000, 1000))].sort()).toEqual([1, 3])
+  })
+})
+
+describe('Dachfenster', () => {
+  it('liegt in der Fläche, Oberkante zum First, und folgt Änderungen am Dach', async () => {
+    const { createEmptyHome } = await import('./home')
+    const { applyCommand } = await import('./commands')
+    const { pitchedSize } = await import('./geometry')
+    const home = createEmptyHome()
+    const r = roof(rect(800, 1200))
+    home.roofs = [r]
+    const window = { x: 600, y: 200, width: 80, depth: 10, height: 120, angle: 0, level: null }
+    const placement = skylightPlacement(home, window)!
+    expect(placement.roofId).toBe(r.id)
+    // Nordfläche steigt nach +y: lokal −y zeigt hinauf, also Drehung um 180°
+    expect(placement.angle).toBeCloseTo(Math.PI, 6)
+    expect(placement.pitch).toBeCloseTo(Math.PI / 2 - deg(40), 6)
+    const offset = 20 / Math.cos(deg(40))
+    const center = 250 + 200 * Math.tan(deg(40)) + offset / 2
+    expect(placement.elevation + pitchedSize({ ...window, pitch: placement.pitch }).height / 2).toBeCloseTo(center, 0)
+    // Öffnung im Plan: Breite × Höhe · cos(Neigung)
+    const hole = skylightHole({ ...window, ...placement } as never)
+    expect(Math.abs(polygonArea(hole))).toBeCloseTo(80 * 120 * Math.cos(deg(40)), 3)
+
+    home.furniture = [{ ...window, ...placement, id: 'w' } as never]
+    applyCommand(home, { type: 'updateRoofs', changes: [{ id: r.id, ...shapeEdges({ ...r, slope: deg(30) }, 'gable'), slope: deg(30) }] })
+    expect(home.furniture[0].pitch).toBeCloseTo(Math.PI / 2 - deg(30), 6)
   })
 })

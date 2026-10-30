@@ -10,7 +10,7 @@ import { pieceFromCatalog } from '../model/furniture'
 import { dimensionLength, distance, distanceToSegment, pointInPolygon, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
-import { createRoof, outlineFromWalls, rawRoofModel, roofContour, wallsUnderRoofEdge } from '../model/roofs'
+import { createRoof, outlineFromWalls, rawRoofModel, roofContour, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
 import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
@@ -80,6 +80,17 @@ function dimensionPoint(home: Home, start: Point | null, point: Point, magnetism
   return start ? magnetizeWallEnd(start, point, scale) : roundPoint(point)
 }
 
+/**
+ * Tür bzw. Fenster an einer Wand einrasten, sonst als Dachfenster auf einem Dach; ein Dachfenster, das
+ * keines mehr ist, steht wieder aufrecht in der Höhe aus dem Katalog.
+ */
+function snapDoorOrWindow(home: Home, piece: HomePiece): Partial<HomePiece> | null {
+  const upright = piece.roofId || piece.pitch ? { pitch: 0, roofId: null, elevation: useCatalogStore.getState().findPiece(piece.catalogId ?? '')?.elevation ?? 0 } : null
+  const wall = snapDoorOrWindowToWall(home, piece)
+  if (wall) return { ...wall, ...upright }
+  return skylightPlacement(home, piece) ?? upright
+}
+
 /** Befehl, den eine Mausaktion beim Loslassen ausführt (und der vorher als Vorschau dient). */
 function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeCommand | null {
   if (gesture.kind === 'move') {
@@ -88,8 +99,10 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
     if (dx === 0 && dy === 0) return null
     const piece = gesture.ids.length === 1 ? home.furniture.find((p) => p.id === gesture.ids[0]) : undefined
     if (piece?.doorOrWindowInfo && gesture.magnetism) {
-      const snapped = snapDoorOrWindowToWall(home, { ...piece, x: piece.x + dx, y: piece.y + dy })
-      if (snapped) return { type: 'updateFurniture', changes: [{ id: piece.id, ...snapped }] }
+      const x = piece.x + dx
+      const y = piece.y + dy
+      const snapped = snapDoorOrWindow(home, { ...piece, x, y })
+      if (snapped) return { type: 'updateFurniture', changes: [{ id: piece.id, x, y, ...snapped }] }
     }
     return { type: 'moveItems', ids: gesture.ids, dx, dy }
   }
@@ -615,7 +628,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const catalogPiece = useCatalogStore.getState().findPiece(catalogId)
     if (!catalogPiece) return
     let piece = pieceFromCatalog(catalogPiece, point[0], point[1])
-    const snapped = magnetism ? snapDoorOrWindowToWall(home, piece) : null
+    const snapped = magnetism && piece.doorOrWindowInfo ? snapDoorOrWindow(home, { ...piece, level: home.selectedLevel }) : null
     if (snapped) piece = { ...piece, ...snapped }
     executeCommand({ type: 'addItems', furniture: [piece] })
     dispatch({ type: 'select', ids: [piece.id] })

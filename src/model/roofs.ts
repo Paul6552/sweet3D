@@ -3,13 +3,14 @@
  * die Dachflächen mit Überstand, Dicke und Öffnungen. Alle Höhen relativ zum Boden der Ebene des Dachs.
  */
 import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
-import { pointInPolygon, polygonArea, wallPolygon, type Point } from './geometry'
+import { pieceCorners, pitchedSize, pointInPolygon, polygonArea, wallPolygon, type Point } from './geometry'
 import {
   DEFAULT_ROOF_OVERHANG,
   DEFAULT_ROOF_SLOPE,
   DEFAULT_ROOF_THICKNESS,
   newId,
   type Home,
+  type HomePiece,
   type Roof,
   type RoofEdge,
   type RoofProfileStep,
@@ -827,3 +828,55 @@ export function wallCaps(home: Pick<Home, 'levels' | 'roofs'>, models: Map<strin
 }
 
 export { DEFAULT_ROOF_OVERHANG, DEFAULT_ROOF_THICKNESS }
+
+/**
+ * Lage eines Dachfensters auf der Dachfläche im Punkt (x, y): Die Neigung (pitch = 90° − Dachneigung)
+ * legt das Fenster in die Fläche, seine Vorderseite (lokal +y) zeigt nach außen, die Oberkante zum
+ * First. Die Mitte des Fensters liegt in der Mitte der Dachdicke; {@code elevation} ist wie in Sweet
+ * Home 3D die Unterkante des geneigten Fensters. {@code null}, wenn dort kein Dach der Ebene ist.
+ */
+export function skylightPlacement(
+  home: Pick<Home, 'levels' | 'wallHeight' | 'roofs'>,
+  piece: Pick<HomePiece, 'x' | 'y' | 'depth' | 'height' | 'angle' | 'level'>,
+  model: (roof: Roof) => RoofModel = (roof) => rawRoofModel(home, roof),
+): Pick<HomePiece, 'angle' | 'pitch' | 'elevation' | 'roofId'> | null {
+  const p: Point = [piece.x, piece.y]
+  let best: { roof: Roof; surface: RoofSurface; z: number } | null = null
+  for (const roof of home.roofs) {
+    if ((roof.level ?? null) !== (piece.level ?? null)) continue
+    const surface = roofSurfaceAt(model(roof), p)
+    const z = surface ? planeZ(surface.plane, p) : -Infinity
+    if (surface && (!best || z > best.z)) best = { roof, surface, z }
+  }
+  if (!best) return null
+  const { surface, z } = best
+  const flat = surface.slope < MIN_SLOPE
+  const pitch = Math.PI / 2 - (flat ? 0 : surface.slope)
+  // Lokal −y zeigt die Fläche hinauf: (sin a, −cos a) = up
+  const angle = flat ? piece.angle : Math.atan2(surface.up[0], -surface.up[1])
+  const center = z - surface.offset / 2
+  const { height } = pitchedSize({ ...piece, pitch })
+  return {
+    angle: ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI),
+    pitch,
+    elevation: Math.round((center - height / 2) * 10) / 10,
+    roofId: best.roof.id,
+  }
+}
+
+/** Öffnung eines Dachfensters im Plan: Breite × Höhe des Fensters in der Fläche, ohne Rahmentiefe. */
+export function skylightHole(piece: HomePiece): Point[] {
+  return pieceCorners({ ...piece, depth: piece.height * Math.abs(Math.sin(piece.pitch ?? 0)), pitch: 0 })
+}
+
+/** Dachfenster an geänderte Dächer anpassen (Neigung, Richtung, Höhe). */
+export function refitSkylights(home: Home, roofIds: Set<string>) {
+  // Neu berechnet: Die geänderten Dächer können dieselben Objekte sein wie vorher (Zwischenspeicher)
+  const models = new Map<Roof, RoofModel>()
+  const model = (roof: Roof) => models.get(roof) ?? models.set(roof, computeRoof(roof, roofContext(home, roof))).get(roof)!
+  for (const piece of home.furniture) {
+    if (!piece.roofId || !roofIds.has(piece.roofId)) continue
+    const placement = skylightPlacement(home, piece, model)
+    if (placement) Object.assign(piece, placement)
+  }
+}

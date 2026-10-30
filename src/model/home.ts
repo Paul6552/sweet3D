@@ -71,6 +71,8 @@ export interface Wall {
   /** Seite links bzw. rechts in Zeichenrichtung (vom Start zum Ende). */
   leftSide?: Surface
   rightSide?: Surface
+  /** Oberkante folgt der Unterseite eines Dachs darüber (Giebel- und Kniestockwände). */
+  toRoof?: boolean
 }
 
 export interface Room {
@@ -83,6 +85,64 @@ export interface Room {
   floor?: Surface
   ceiling?: Surface
 }
+
+/**
+ * Abschnitt im Profil einer Dachkante: bis {@code height} (cm über der Traufe, {@code null} = bis
+ * oben) hat die Dachfläche die Neigung {@code slope} (Radiant, π/2 = senkrecht, also Giebel).
+ */
+export interface RoofProfileStep {
+  height: number | null
+  slope: number
+}
+
+/** Einstellungen einer Kante des Dachs; {@code null} heißt: wie das ganze Dach. */
+export interface RoofEdge {
+  profile: RoofProfileStep[] | null
+  overhang: number | null
+}
+
+/** Zuletzt gewählte Vorlage; „custom“, sobald Kanten einzeln geändert wurden. */
+export type RoofShape = 'flat' | 'shed' | 'gable' | 'hip' | 'halfHip' | 'mansard' | 'mansardHip' | 'barrel' | 'custom'
+
+/**
+ * Dach (gibt es in Sweet Home 3D nicht): Grundriss an der Außenkante der Wände und Profil je Kante.
+ * Die Flächen ergeben sich daraus über ein gewichtetes Straight Skeleton (model/roofs.ts).
+ */
+export interface Roof {
+  id: string
+  name: string | null
+  level: string | null
+  /** Traufpolygon an der Außenkante der Wände (ohne Überstand). */
+  points: [number, number][]
+  /** Innenhöfe; ihre Kanten haben die Einstellungen des Dachs. */
+  holes: [number, number][][]
+  /** {@code edges[i]} gehört zur Kante von {@code points[i]} nach {@code points[i + 1]}. */
+  edges: RoofEdge[]
+  /** Höhe, in der die Unterseite die Außenkante der Wände trifft; {@code null} = Wandhöhe der Ebene. */
+  baseHeight: number | null
+  /** Standardneigung in Radiant. */
+  slope: number
+  /** Standardüberstand über die Wand hinaus. */
+  overhang: number
+  /** Dicke senkrecht zur Dachfläche. */
+  thickness: number
+  /** Größte Höhe über der Traufe; darüber ist das Dach flach. */
+  maxHeight: number | null
+  /** Höhe der Brüstung (Attika) eines Flachdachs. */
+  parapet: number | null
+  shape: RoofShape
+  /** Dachdeckung, Untersicht und Stirnseiten. */
+  top?: Surface
+  underside?: Surface
+  sides?: Surface
+  visible: boolean
+  /** Gaube: Hauptdach, in das sie schneidet, und ihre Wände (werden mit ihr verschoben und gelöscht). */
+  dormer?: { roofId: string; wallIds: string[] } | null
+}
+
+export const DEFAULT_ROOF_SLOPE = (35 * Math.PI) / 180
+export const DEFAULT_ROOF_OVERHANG = 40
+export const DEFAULT_ROOF_THICKNESS = 25
 
 /** Maßlinie: gemessene Strecke und Abstand der Linie davon (positiv = links in Messrichtung). */
 export interface DimensionLine {
@@ -145,6 +205,13 @@ export interface HomePiece {
   staircaseCutOutShape?: string | null
   /** Bibliothek des Katalogeintrags; fehlt bei Möbeln aus dem Standardkatalog. */
   libraryId?: string | null
+  /**
+   * Neigung um die Breitenachse wie {@code pitch} in Sweet Home 3D (Dachfenster); die Unterkante des
+   * geneigten Möbels liegt auf {@code elevation}.
+   */
+  pitch?: number
+  /** Dachfenster: Dach, in dessen Fläche das Möbel sitzt und das es ausschneidet. */
+  roofId?: string | null
   level: string | null
 }
 
@@ -283,6 +350,7 @@ export interface Home {
   selectedLevel: string | null
   walls: Wall[]
   rooms: Room[]
+  roofs: Roof[]
   furniture: HomePiece[]
   dimensionLines: DimensionLine[]
   labels: Label[]
@@ -304,6 +372,7 @@ export function createEmptyHome(): Home {
     selectedLevel: null,
     walls: [],
     rooms: [],
+    roofs: [],
     furniture: [],
     dimensionLines: [],
     labels: [],
@@ -331,6 +400,7 @@ export function normalizeHome(raw: unknown): Home {
     selectedLevel: home.selectedLevel ?? null,
     walls,
     rooms,
+    roofs: (home.roofs ?? []).map((r) => ({ ...r, level: r.level ?? null })),
     furniture: (home.furniture ?? []).map((p) => ({ ...p, doorOrWindowInfo: p.doorOrWindowInfo ?? null, level: p.level ?? null })),
     dimensionLines: home.dimensionLines ?? [],
     labels: home.labels ?? [],
@@ -341,10 +411,10 @@ export function normalizeHome(raw: unknown): Home {
 }
 
 /** Alle Objekte, die auf einer Ebene liegen und im Plan ausgewählt werden können. */
-export type HomeItem = Wall | Room | HomePiece | DimensionLine | Label
+export type HomeItem = Wall | Room | Roof | HomePiece | DimensionLine | Label
 
 export function homeItems(home: Home): HomeItem[] {
-  return [...home.walls, ...home.rooms, ...home.furniture, ...home.dimensionLines, ...home.labels]
+  return [...home.walls, ...home.rooms, ...home.roofs, ...home.furniture, ...home.dimensionLines, ...home.labels]
 }
 
 export function newId(prefix: string): string {

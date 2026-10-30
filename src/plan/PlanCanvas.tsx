@@ -10,7 +10,7 @@ import { pieceFromCatalog } from '../model/furniture'
 import { dimensionLength, distance, distanceToSegment, pointInPolygon, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
-import { createRoof, outlineFromWalls, rawRoofModel, roofContour, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
+import { createDormer, createRoof, outlineFromWalls, rawRoofModel, roofContour, roofHeightAt, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
 import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
@@ -38,6 +38,7 @@ type Gesture =
   | { kind: 'handle'; handle: Handle; current: Point; magnetism: boolean }
   | { kind: 'observer'; part: 'move' | 'rotate'; start: Point; camera: ObserverCamera }
   | { kind: 'compass'; start: Point; current: Point }
+  | { kind: 'dormer'; roofId: string; start: Point; current: Point; gable: boolean }
 
 /** Wandkette im Wand-Modus: Startpunkt der nächsten Wand und woran sie anschließt. */
 interface WallChain {
@@ -111,6 +112,11 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
     const dy = round1(gesture.current[1] - gesture.start[1])
     if (dx === 0 && dy === 0) return null
     return { type: 'updateCompass', change: { x: round1(home.compass.x + dx), y: round1(home.compass.y + dy) } }
+  }
+  if (gesture.kind === 'dormer') {
+    const main = home.roofs.find((r) => r.id === gesture.roofId)
+    const dormer = main && distance(gesture.start, gesture.current) >= DRAG_THRESHOLD_PX / scale ? createDormer(home, main, gesture.start, gesture.current, gesture.gable ? 'gable' : 'shed') : null
+    return dormer ? { type: 'addItems', roofs: [dormer.roof], walls: dormer.walls } : null
   }
   if (gesture.kind !== 'handle') return null
   const { handle, current, magnetism } = gesture
@@ -491,6 +497,14 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     } else if (mode === 'roof') {
       const snapped = magnet ? snapToPoints(point, [...roomSnapPoints(home), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : point
       setRoofPoints((points) => [...points, roundPoint(snapped)])
+    } else if (mode === 'dormer') {
+      // Oberstes Dach (keine Gaube) unter dem Punkt
+      const roof = home.roofs
+        .filter((r) => !r.dormer)
+        .map((r) => ({ r, z: roofHeightAt(rawRoofModel(home, r), point) }))
+        .filter((c): c is { r: (typeof home.roofs)[number]; z: number } => c.z !== null)
+        .sort((a, b) => b.z - a.z)[0]?.r
+      if (roof) setGesture({ kind: 'dormer', roofId: roof.id, start: point, current: point, gable: event.shiftKey })
     } else if (mode === 'dimension') {
       if (!dimension) {
         setDimension({ start: dimensionPoint(home, null, point, magnet, scale), end: null })
@@ -551,7 +565,13 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const start = pressStart.current
     if ((gesture.kind === 'move' || gesture.kind === 'compass') && start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < DRAG_THRESHOLD_PX) return
     const magnet = magnetism !== event.altKey
-    setGesture(gesture.kind === 'rubberBand' || gesture.kind === 'compass' ? { ...gesture, current: point } : { ...gesture, current: point, magnetism: magnet })
+    setGesture(
+      gesture.kind === 'dormer'
+        ? { ...gesture, current: point, gable: event.shiftKey }
+        : gesture.kind === 'rubberBand' || gesture.kind === 'compass'
+          ? { ...gesture, current: point }
+          : { ...gesture, current: point, magnetism: magnet },
+    )
   }
 
   const onPointerUp = () => {
@@ -563,6 +583,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     } else {
       const command = gestureCommand(home, gesture, scale)
       if (command) executeCommand(command)
+      // Neue Gaube auswählen, damit Formleiste und Dialog gleich für sie gelten
+      if (command?.type === 'addItems' && command.roofs) dispatch({ type: 'select', ids: command.roofs.map((r) => r.id) })
     }
     setGesture(null)
   }
@@ -683,6 +705,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     preview.label = { point: pointer.point, text: `${round1(dimensionLength(line))} cm` }
   }
   if (gesture?.kind === 'rubberBand') preview.rubberBand = [gesture.start, gesture.current]
+  if (gesture?.kind === 'dormer' && pendingCommand?.type === 'addItems') preview.dormer = pendingCommand.roofs?.[0]?.points
   if (gesture && pointer) {
     const text = gestureLabel(displayed, gesture)
     if (text) preview.label = { point: pointer.point, text }
@@ -696,6 +719,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         ? t(roomPoints.length > 0 ? 'plan.hints.roomNext' : 'plan.hints.roomStart')
         : mode === 'roof'
           ? t(roofPoints.length > 0 ? 'plan.hints.roofNext' : 'plan.hints.roofStart')
+        : mode === 'dormer'
+          ? t('plan.hints.dormer')
         : mode === 'dimension'
           ? t(!dimension ? 'plan.hints.dimensionStart' : !dimension.end ? 'plan.hints.dimensionEnd' : 'plan.hints.dimensionOffset')
           : mode === 'label'

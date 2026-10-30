@@ -1,3 +1,4 @@
+import Cottage from '@mui/icons-material/Cottage'
 import EditOutlined from '@mui/icons-material/EditOutlined'
 import FitScreen from '@mui/icons-material/FitScreen'
 import FormatShapes from '@mui/icons-material/FormatShapes'
@@ -34,6 +35,7 @@ const MODES: { mode: PlanMode; icon: React.ReactNode; key: string }[] = [
   { mode: 'wall', icon: <Polyline fontSize="small" />, key: 'W' },
   { mode: 'room', icon: <FormatShapes fontSize="small" />, key: 'R' },
   { mode: 'roof', icon: <Roofing fontSize="small" />, key: 'D' },
+  { mode: 'dormer', icon: <Cottage fontSize="small" />, key: 'G' },
   { mode: 'dimension', icon: <Straighten fontSize="small" />, key: 'M' },
   { mode: 'label', icon: <TextFields fontSize="small" />, key: 'T' },
 ]

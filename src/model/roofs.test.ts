@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Point } from './geometry'
 import type { Roof } from './home'
-import { cleanRing, computeRoof, createRoof, gableEdges, roofAreas, roofHeightAt, roofHeightsAlong, shapeEdges, skylightHole, skylightPlacement, type RoofModel } from './roofs'
-import { polygonArea } from './geometry'
+import { cleanRing, computeRoof, createDormer, createRoof, edgeKind, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
+import { pointInPolygon, polygonArea, wallPolygon } from './geometry'
 
 const deg = (d: number) => (d * Math.PI) / 180
 const rect = (w: number, l: number): Point[] => [
@@ -173,5 +173,53 @@ describe('Dachfenster', () => {
     home.furniture = [{ ...window, ...placement, id: 'w' } as never]
     applyCommand(home, { type: 'updateRoofs', changes: [{ id: r.id, ...shapeEdges({ ...r, slope: deg(30) }, 'gable'), slope: deg(30) }] })
     expect(home.furniture[0].pitch).toBeCloseTo(Math.PI / 2 - deg(30), 6)
+  })
+})
+
+describe('Gauben', () => {
+  it('Schleppgaube: an der Fläche ausgerichtet, Hauptdach offen, Wände stehen auf dem Dach', async () => {
+    const { createEmptyHome } = await import('./home')
+    const home = createEmptyHome()
+    const main = roof(rect(800, 1200), { slope: deg(45) })
+    home.roofs = [main]
+    // Südfläche (y > 400) steigt nach −y
+    const dormer = createDormer(home, main, [400, 700], [600, 500])!
+    expect(dormer).not.toBeNull()
+    const { roof: d, walls, outline } = dormer
+    expect(d.dormer).toEqual({ roofId: main.id, wallIds: walls.map((w) => w.id) })
+    expect(walls).toHaveLength(3)
+    // Front parallel zur Traufe am weiter unten liegenden Punkt; hinten am Rechteck trifft das Gaubendach
+    // das Hauptdach, der Umriss reicht 30 cm darüber
+    expect(outline[0][1]).toBeCloseTo(700, 5)
+    expect(outline[1][1]).toBeCloseTo(700, 5)
+    expect(Math.abs(outline[1][0] - outline[0][0])).toBeCloseTo(200, 5)
+    expect(outline[2][1]).toBeCloseTo(470, 5)
+    const top = computeRoof(d, { wallHeight: 250 })
+    expect(roofHeightAt(top, [500, 505])! - roofHeightAt(computeRoof(main, { wallHeight: 250 }), [500, 505])!).toBeGreaterThan(0)
+    expect(roofHeightAt(top, [500, 495])! - roofHeightAt(computeRoof(main, { wallHeight: 250 }), [500, 495])!).toBeLessThan(0)
+    home.roofs = [main, d]
+    const models = roofModels(home)
+    // Öffnung im Hauptdach, Gaubendach endet am Hauptdach
+    expect(roofAreas(models.get(main.id)!).plan).toBeLessThan(roofAreas(computeRoof(main, { wallHeight: 250 })).plan - 100 * 100)
+    const raw = computeRoof(d, { wallHeight: 250 })
+    expect(roofAreas(models.get(d.id)!).plan).toBeLessThan(roofAreas(raw).plan)
+    // Frontwand: unten auf der Unterseite des Hauptdachs, oben an der Traufe der Gaube
+    const front = walls[1]
+    const caps = wallCaps(home, models, null, wallPolygon(front, new Map(walls.map((w) => [w.id, w]))), 250, { model: computeRoof(main, { wallHeight: 250 }), level: null })
+    const mid: Point = [(front.xStart + front.xEnd) / 2, (front.yStart + front.yEnd) / 2]
+    const cap = caps.find((c) => c.bottom && c.area.some((poly) => pointInPolygon(mid, poly[0] as Point[])))!
+    expect(cap).toBeDefined()
+    expect(linearZ(cap.height, mid) - linearZ(cap.bottom!, mid)).toBeGreaterThan(140)
+    expect(linearZ(cap.bottom!, mid)).toBeCloseTo(roofHeightAt(computeRoof(main, { wallHeight: 250 }), mid, 'bottom')!, 3)
+  })
+
+  it('Satteldachgaube: Giebel vorn und hinten', () => {
+    const main = roof(rect(800, 1200), { slope: deg(45) })
+    const home = { levels: [], wallHeight: 250, roofs: [main] }
+    const { roof: d } = createDormer(home, main, [400, 700], [600, 500], 'gable')!
+    expect(edgeKind(d, d.edges[0])).toBe('gable')
+    expect(edgeKind(d, d.edges[1])).toBe('eave')
+    expect(edgeKind(d, d.edges[2])).toBe('gable')
+    expect(edgeKind(d, d.edges[3])).toBe('eave')
   })
 })

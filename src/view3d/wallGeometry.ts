@@ -57,7 +57,7 @@ export function wallSlices(
   const height = wall.height ?? wallHeight
   const polygon = wallPolygon(wall, wallsById)
   const outline: Polygon = [ring(polygon)]
-  const parts = caps ?? [{ area: [outline], height: [0, 0, height] as LinearHeight }]
+  const parts: WallCap[] = caps ?? [{ area: [outline], height: [0, 0, height] as LinearHeight }]
   const openings = doorsAndWindows
     .filter((p) => p.visible)
     .map((piece) => ({ piece, area: cutOut(piece, wall.thickness) }))
@@ -75,16 +75,20 @@ export function wallSlices(
   const sorted = [...levels].filter((z) => z >= -floorThickness && z <= top).sort((a, b) => a - b)
 
   const slices: WallSlice[] = []
-  const add = (area: MultiPolygon, bottom: number, sliceTop: number, cap: LinearHeight | null) => {
+  const add = (area: MultiPolygon, bottom: number, sliceTop: number, cap: WallCap | null) => {
     if (area.length === 0) return
-    const geometry = new ExtrudeGeometry(toShapes(area), { depth: sliceTop - bottom, bevelEnabled: false })
+    const depth = sliceTop - bottom
+    const geometry = new ExtrudeGeometry(toShapes(area), { depth, bevelEnabled: false })
     if (cap) {
-      // Deckfläche (z = 0, Szenenhöhe sliceTop) auf die schräge Oberkante legen
+      // Deck- (z = 0, Szenenhöhe sliceTop) und Grundfläche (z = depth) auf Ober- und Unterkante legen
+      const clamp = (z: number) => Math.min(sliceTop, Math.max(bottom, z))
       const position = geometry.getAttribute('position')
       for (let i = 0; i < position.count; i++) {
-        if (Math.abs(position.getZ(i)) > 1e-6) continue
-        const z = linearZ(cap, [position.getX(i), position.getY(i)])
-        position.setZ(i, Math.min(sliceTop - bottom, Math.max(0, sliceTop - z)))
+        const p: Point = [position.getX(i), position.getY(i)]
+        const top = clamp(linearZ(cap.height, p))
+        const atTop = Math.abs(position.getZ(i)) < 1e-6
+        const z = atTop ? top : Math.min(top, cap.bottom ? clamp(linearZ(cap.bottom, p)) : bottom)
+        position.setZ(i, sliceTop - z)
       }
       geometry.computeVertexNormals()
     }
@@ -97,20 +101,19 @@ export function wallSlices(
     const active = openings.filter(({ piece }) => piece.elevation <= bottom && piece.elevation + piece.height >= sliceTop)
     const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? polygonClipping.difference(area, ...active.map(({ area }) => [area] as Polygon)) : area)
     const full: MultiPolygon[] = []
-    for (const { area, height: [gx, gy, g0] } of parts) {
-      if (gx === 0 && gy === 0) {
+    for (const cap of parts) {
+      const [gx, gy, g0] = cap.height
+      if (gx === 0 && gy === 0 && !cap.bottom) {
         // Waagrechte Oberkante: Ihre Höhe ist eine Scheibengrenze
-        if (g0 >= sliceTop) full.push(area)
+        if (g0 >= sliceTop) full.push(cap.area)
         continue
       }
-      // Ganz hoch, wo die Oberkante über der Scheibe liegt; schräg abgeschnitten, wo sie durch die Scheibe läuft
-      const above = halfPlane(-gx, -gy, g0 - sliceTop, polygon)
+      // Teil der Scheibe, in dem die Oberkante über ihrer Unterseite und die Unterkante unter ihrer Oberseite liegt
       const over = halfPlane(-gx, -gy, g0 - bottom, polygon)
-      if (!over) continue
-      const whole = above ? polygonClipping.intersection(area, above) : []
-      if (whole.length > 0) full.push(whole)
-      const sloped = above ? polygonClipping.difference(polygonClipping.intersection(area, over), above) : polygonClipping.intersection(area, over)
-      if (sloped.length > 0) add(cut(sloped), bottom, sliceTop, [gx, gy, g0])
+      const under = cap.bottom ? halfPlane(cap.bottom[0], cap.bottom[1], sliceTop - cap.bottom[2], polygon) : null
+      if (!over || (cap.bottom && !under)) continue
+      const area = polygonClipping.intersection(cap.area, over, ...(under ? [under] : []))
+      if (area.length > 0) add(cut(area), bottom, sliceTop, cap)
     }
     if (full.length > 0) add(cut(full.length === 1 ? full[0] : polygonClipping.union(full[0], ...full.slice(1))), bottom, sliceTop, null)
   }

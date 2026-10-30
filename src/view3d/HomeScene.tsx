@@ -193,7 +193,11 @@ function LevelScene({
   const walls = useMemo(
     () =>
       levelWalls.map((wall) => {
-        const caps = wall.toRoof ? wallCaps(home, roofs, levelId, wallPolygon(wall, wallsById), wall.height ?? height) : undefined
+        // Wände einer Gaube stehen auf dem Hauptdach (ohne die Öffnung der Gaube darin)
+        const main = home.roofs.find((r) => r.dormer?.wallIds.includes(wall.id))?.dormer?.roofId
+        const mainRoof = main ? home.roofs.find((r) => r.id === main) : undefined
+        const standOn = mainRoof ? { model: rawRoofModel(home, mainRoof), level: mainRoof.level } : undefined
+        const caps = wall.toRoof ? wallCaps(home, roofs, levelId, wallPolygon(wall, wallsById), wall.height ?? height, standOn) : undefined
         return { wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById, floorThickness, caps) }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- von home zählen nur Ebenen und Dächer (in roofs)

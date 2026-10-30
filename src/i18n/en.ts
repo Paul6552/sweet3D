@@ -133,7 +133,7 @@ export const en: Resources = {
     deleteConfirm: 'Delete level “{{name}}” with all its walls, rooms and furniture?',
   },
   plan: {
-    modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms', roof: 'Create roof', dimension: 'Create dimensions', label: 'Add text' },
+    modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms', roof: 'Create roof', dormer: 'Create dormer', dimension: 'Create dimensions', label: 'Add text' },
     modify: 'Modify selection (double-click)',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
@@ -149,6 +149,7 @@ export const en: Resources = {
       roomNext: 'Click sets the next point · Double-click or Enter finishes · Esc cancels',
       roofStart: 'Double-click inside a house puts a roof over its outer walls · or click to set the eave corners',
       roofNext: 'Click sets the next eave corner · Double-click or Enter finishes · Esc cancels',
+      dormer: 'Drag a rectangle on a roof face to add a shed dormer · with Shift a gable dormer',
       dimensionStart: 'Click to set the start of the dimension · snaps to corners',
       dimensionEnd: 'Click to set the end of the dimension · Esc cancels',
       dimensionOffset: 'Move the mouse to set the offset, click to finish',

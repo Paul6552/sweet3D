@@ -679,11 +679,13 @@ export function shapeEdges(roof: Roof, shape: RoofShape): Pick<Roof, 'edges' | '
   // Halbe Breite: Firsthöhe eines 45°-Walmdachs
   const hip45 = computeRoof({ ...roof, shape: 'hip', slope: Math.PI / 4, thickness: 1, overhang: 0, maxHeight: null, edges: points.map(() => ({ profile: null, overhang: 0 })) }, { wallHeight: 0 })
   const halfWidth = Math.max(50, hip45.ridge - 1)
-  const gables = gableEdges(points)
+  // Gaube: Kante 0 ist die Front, Kante 2 liegt im Hauptdach und bleibt immer Giebel
+  const dormer = !!roof.dormer && points.length === 4
+  const gables = dormer ? new Set([0, 2]) : gableEdges(points)
   const lengths = edgeLengths(points)
-  const longest = lengths.indexOf(Math.max(...lengths))
+  const longest = dormer ? 0 : lengths.indexOf(Math.max(...lengths))
   const gable: RoofProfileStep[] = [{ height: null, slope: GABLE }]
-  const edge = (i: number, profile: RoofProfileStep[] | null): RoofEdge => ({ profile, overhang: roof.edges[i]?.overhang ?? null })
+  const edge = (i: number, profile: RoofProfileStep[] | null): RoofEdge => ({ profile: dormer && i === 2 ? gable : profile, overhang: roof.edges[i]?.overhang ?? null })
   switch (shape) {
     case 'hip':
       return { ...base, edges: points.map((_, i) => edge(i, null)) }
@@ -788,10 +790,12 @@ export const roofElevation = (home: Home, roof: Roof) => levelElevation(home, ro
 /** Lineare Höhe z = gx·x + gy·y + g0. */
 export type LinearHeight = [number, number, number]
 
-/** Teil des Grundrisses einer Wand mit der Höhe ihrer Oberkante (über dem Boden der Ebene der Wand). */
+/** Teil des Grundrisses einer Wand mit der Höhe ihrer Ober- und ggf. Unterkante (über dem Boden der Ebene der Wand). */
 export interface WallCap {
   area: MultiPolygon
   height: LinearHeight
+  /** Unterkante, wenn die Wand auf einem Dach steht (Gaube); sonst unten wie jede Wand. */
+  bottom?: LinearHeight
 }
 
 export const linearZ = ([gx, gy, g0]: LinearHeight, [x, y]: Point) => gx * x + gy * y + g0
@@ -802,7 +806,14 @@ export const linearZ = ([gx, gy, g0]: LinearHeight, [x, y]: Point) => gx * x + g
  * Ebenen, über die absolute Höhe). Liegen Flächen übereinander, gilt die des niedrigeren Dachs. Wo
  * kein Dach ist, bleibt die Wand {@code height} hoch.
  */
-export function wallCaps(home: Pick<Home, 'levels' | 'roofs'>, models: Map<string, RoofModel>, level: string | null, outline: Point[], height: number): WallCap[] {
+export function wallCaps(
+  home: Pick<Home, 'levels' | 'roofs'>,
+  models: Map<string, RoofModel>,
+  level: string | null,
+  outline: Point[],
+  height: number,
+  standOn?: { model: RoofModel; level: string | null },
+): WallCap[] {
   const base = levelElevation(home as Home, level)
   const wall: Polygon = [closed(outline)]
   const caps: WallCap[] = []
@@ -813,18 +824,38 @@ export function wallCaps(home: Pick<Home, 'levels' | 'roofs'>, models: Map<strin
     .sort((a, b) => a.model.eave + a.shift - (b.model.eave + b.shift))
   for (const { model, shift } of roofs) {
     for (const surface of model.surfaces) {
-      const { a, b, c, d } = surface.plane
       let area = polygonClipping.intersection(wall, surface.rings.map(closed) as Polygon)
       if (area.length === 0) continue
       if (assigned.length > 0) area = polygonClipping.difference(area, assigned)
       if (area.length === 0) continue
       assigned = polygonClipping.union(assigned, area)
-      caps.push({ area, height: [-a / c, -b / c, d / c - surface.offset + shift] })
+      caps.push({ area, height: underside(surface, shift) })
     }
   }
   const rest = assigned.length > 0 ? polygonClipping.difference(wall, assigned) : [wall]
   if (rest.length > 0) caps.push({ area: rest, height: [0, 0, height] })
-  return caps
+  if (!standOn) return caps
+  // Wände einer Gaube stehen auf der Unterseite des Hauptdachs
+  const shift = levelElevation(home as Home, standOn.level) - base
+  return caps.flatMap((cap) => {
+    const parts: WallCap[] = []
+    let rest = cap.area
+    for (const surface of standOn.model.surfaces) {
+      if (rest.length === 0) break
+      const ring = surface.rings.map(closed) as Polygon
+      const area = polygonClipping.intersection(rest, ring)
+      if (area.length === 0) continue
+      parts.push({ ...cap, area, bottom: underside(surface, shift) })
+      rest = polygonClipping.difference(rest, ring)
+    }
+    if (rest.length > 0) parts.push({ ...cap, area: rest })
+    return parts
+  })
+}
+
+/** Unterseite einer Dachfläche als lineare Höhe, um {@code shift} angehoben. */
+function underside({ plane: { a, b, c, d }, offset }: RoofSurface, shift: number): LinearHeight {
+  return [-a / c, -b / c, d / c - offset + shift]
 }
 
 export { DEFAULT_ROOF_OVERHANG, DEFAULT_ROOF_THICKNESS }
@@ -879,4 +910,88 @@ export function refitSkylights(home: Home, roofIds: Set<string>) {
     const placement = skylightPlacement(home, piece, model)
     if (placement) Object.assign(piece, placement)
   }
+}
+
+/** Mindesthöhe der Gaubenfront über der Unterseite des Hauptdachs (bis zur Traufe der Gaube). */
+const DORMER_MIN_FRONT = 80
+const DORMER_WALL_THICKNESS = 12
+
+/**
+ * Gaube auf der Fläche des Dachs {@code main}, die im Plan unter {@code a} liegt: Breite und Front aus dem
+ * Rechteck von {@code a} nach {@code b}, ausgerichtet an der Fläche (Front unten, parallel zur Traufe).
+ * Hinten am Rechteck trifft ihr Dach auf das Hauptdach, daraus folgt die Höhe der Front (mindestens
+ * DORMER_MIN_FRONT, dann reicht die Gaube weiter nach hinten, aber nicht über den First). Dazu drei Wände
+ * bis zum Dach, die auf dem Hauptdach stehen. {@code null}, wenn dort keine geneigte Fläche ist oder das
+ * Rechteck zu schmal ist.
+ */
+export function createDormer(
+  home: Pick<Home, 'levels' | 'wallHeight' | 'roofs'>,
+  main: Roof,
+  a: Point,
+  b: Point,
+  shape: 'shed' | 'gable' = 'shed',
+): { roof: Roof; walls: Wall[]; outline: Point[] } | null {
+  const model = rawRoofModel(home, main)
+  const surface = roofSurfaceAt(model, a)
+  if (!surface || surface.slope < (10 * Math.PI) / 180 || surface.slope > (80 * Math.PI) / 180) return null
+  const { dir, up } = surface
+  const toUv = (p: Point): Point => [p[0] * dir[0] + p[1] * dir[1], p[0] * up[0] + p[1] * up[1]]
+  const toPlan = ([u, v]: Point): Point => [u * dir[0] + v * up[0], u * dir[1] + v * up[1]]
+  const [ua, va] = toUv(a)
+  const [ub, vb] = toUv(b)
+  const u0 = Math.min(ua, ub)
+  const u1 = Math.max(ua, ub)
+  if (u1 - u0 < 60) return null
+  const v0 = Math.min(va, vb)
+  const front = toPlan([(u0 + u1) / 2, v0])
+  const mainTop = planeZ(surface.plane, front)
+  const slope = shape === 'shed' ? Math.min((15 * Math.PI) / 180, surface.slope / 2) : surface.slope
+  const thickness = main.thickness
+  // Das Gaubendach trifft das Hauptdach hinten am Rechteck, höchstens kurz unter dem First. Daraus
+  // folgt die Höhe der Front h über der Unterseite des Hauptdachs: Die Oberseite der Gaube liegt an der
+  // Front um h − Versatz + extra über dem Hauptdach und steigt um climb je cm langsamer als dieses.
+  const extra = thickness / Math.cos(slope) + (shape === 'gable' ? ((u1 - u0) / 2) * Math.tan(slope) : 0)
+  const climb = Math.tan(surface.slope) - (shape === 'shed' ? Math.tan(slope) : 0)
+  const vMax = Math.max(...surface.rings[0].map((p) => toUv(p)[1])) - 20
+  const heightFor = (meet: number) => climb * meet + surface.offset - extra
+  let meet = Math.min(Math.max(va, vb), vMax) - v0
+  if (heightFor(meet) < DORMER_MIN_FRONT) meet = Math.min(vMax - v0, (DORMER_MIN_FRONT - surface.offset + extra) / climb)
+  const frontHeight = heightFor(meet)
+  if (!(frontHeight >= 30)) return null
+  const eave = mainTop - surface.offset + frontHeight
+  const v1 = v0 + meet + 30
+  const outline = ([[u0, v0], [u1, v0], [u1, v1], [u0, v1]] as Point[]).map(toPlan).map(([x, y]): Point => [Math.round(x * 10) / 10, Math.round(y * 10) / 10])
+
+  // Wände innen an der Außenkante: links (hinten → vorn), Front, rechts (vorn → hinten)
+  const t = DORMER_WALL_THICKNESS
+  const corners = ([[u0 + t / 2, v1], [u0 + t / 2, v0 + t / 2], [u1 - t / 2, v0 + t / 2], [u1 - t / 2, v1]] as Point[]).map(toPlan)
+  const ids = [newId('wall'), newId('wall'), newId('wall')]
+  const walls: Wall[] = ids.map((id, i) => ({
+    id,
+    xStart: Math.round(corners[i][0] * 10) / 10,
+    yStart: Math.round(corners[i][1] * 10) / 10,
+    xEnd: Math.round(corners[i + 1][0] * 10) / 10,
+    yEnd: Math.round(corners[i + 1][1] * 10) / 10,
+    wallAtStart: i > 0 ? ids[i - 1] : null,
+    wallAtEnd: i < 2 ? ids[i + 1] : null,
+    thickness: t,
+    height: null,
+    level: main.level,
+    toRoof: true,
+  }))
+  const base: Roof = {
+    ...createRoof(outline, main.level, shape),
+    baseHeight: Math.round(eave * 10) / 10,
+    slope,
+    overhang: 20,
+    thickness,
+    top: main.top,
+    underside: main.underside,
+    sides: main.sides,
+    dormer: { roofId: main.id, wallIds: ids },
+  }
+  const roof = { ...base, ...shapeEdges(base, shape) }
+  // Hinten im Hauptdach ohne Überstand
+  roof.edges = roof.edges.map((e, i) => (i === 2 ? { ...e, overhang: 0 } : e))
+  return { roof, walls, outline }
 }

@@ -131,7 +131,7 @@ export const de = {
     deleteConfirm: 'Ebene „{{name}}“ mit allen Wänden, Räumen und Möbeln löschen?',
   },
   plan: {
-    modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen', roof: 'Dach anlegen', dimension: 'Maßlinien zeichnen', label: 'Texte einfügen' },
+    modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen', roof: 'Dach anlegen', dormer: 'Gaube anlegen', dimension: 'Maßlinien zeichnen', label: 'Texte einfügen' },
     modify: 'Auswahl ändern (Doppelklick)',
     zoomIn: 'Vergrößern',
     zoomOut: 'Verkleinern',
@@ -147,6 +147,7 @@ export const de = {
       roomNext: 'Klicken setzt den nächsten Punkt · Doppelklick oder Enter beendet · Esc bricht ab',
       roofStart: 'Doppelklick in ein Haus legt das Dach über seine Außenwände · oder Klicken setzt die Ecken der Traufe',
       roofNext: 'Klicken setzt die nächste Ecke der Traufe · Doppelklick oder Enter beendet · Esc bricht ab',
+      dormer: 'Rechteck auf einer Dachfläche ziehen legt eine Schleppgaube an · mit Umschalt eine Satteldachgaube',
       dimensionStart: 'Klicken setzt den Anfang der Maßlinie · rastet an Ecken ein',
       dimensionEnd: 'Klicken setzt das Ende der Maßlinie · Esc bricht ab',
       dimensionOffset: 'Maus bewegen legt den Abstand fest, Klicken beendet',

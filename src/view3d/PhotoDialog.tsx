@@ -24,6 +24,7 @@ import {
   PointLight,
   type Scene,
   Scene as ThreeScene,
+  type ShaderMaterial,
   SRGBColorSpace,
   Vector3,
   WebGLCubeRenderTarget,
@@ -31,6 +32,7 @@ import {
 } from 'three'
 import { WebGLPathTracer } from 'three-gpu-pathtracer'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
+import { compileOnce, slimPathTracerShader } from './pathTracerShader'
 import { createSky, GROUND_BOUNCE } from './sky'
 import { currentExposure } from './eyeAdaptation'
 
@@ -46,6 +48,22 @@ const SIZES = [
   { label: '4K', width: 3840, height: 2160 },
 ] as const
 const SAMPLE_OPTIONS = [64, 256, 1024]
+/**
+ * Angestrebte mittlere GPU-Zeit je Kachel. Treiber setzen die Grafikkarte zurück, wenn ein Befehl
+ * sie zu lange blockiert (Intel i915 unter Linux schon nach 640 ms) – dann geht der WebGL-Kontext
+ * verloren. Der Abstand fängt Kacheln auf, die aufwendiger sind als der Durchschnitt.
+ */
+const TILE_BUDGET_MS = 50
+/** Zeitbudget je Bild für mehrere Kacheln hintereinander, damit die Seite bedienbar bleibt. */
+const FRAME_BUDGET_MS = 30
+/** Start- und Mindestgröße einer Kachel in Pixeln, klein genug auch für schwache integrierte Grafik. */
+const START_TILE_PIXELS = 64 * 64
+
+/** Kachelraster für die gewünschte Pixelzahl je Kachel, ungefähr quadratische Kacheln. */
+function tileGrid(width: number, height: number, tilePixels: number): [number, number] {
+  const side = Math.sqrt(Math.max(tilePixels, START_TILE_PIXELS))
+  return [Math.max(1, Math.ceil(width / side)), Math.max(1, Math.ceil(height / side))]
+}
 
 /**
  * Kopie der sichtbaren Szene für den Pathtracer: Meshes mit ihrer Lage in der Welt (Geometrien
@@ -161,6 +179,10 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
     if (camera.position.length() === 0) camera.position.copy(new Vector3(0, 500, 500))
     const { scene, dispose } = photoScene(current.scene, renderer)
     const tracer = new WebGLPathTracer(renderer)
+    // Fehlt in den Typen der Bibliothek
+    const internals = tracer as unknown as { isCompiling: boolean; _pathTracer: { material: ShaderMaterial & { onBeforeRender: () => void } } }
+    // Kleinerer Shader, der auch auf schwacher Grafik schnell genug kompiliert
+    slimPathTracerShader(internals._pathTracer.material, scene)
     tracer.bounces = 5
     tracer.transmissiveBounces = 4
     // Weniger Glanzpunkt-Rauschen (Fireflies) bei rauen Spiegelungen
@@ -168,8 +190,9 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
     tracer.minSamples = 1
     tracer.renderDelay = 0
     tracer.fadeDuration = 0
-    // Kleine Kacheln je Bild: lange Grafikbefehle setzt der Browser sonst als hängend zurück (Context Lost)
-    tracer.tiles.set(4, 4)
+    // Kleine Kacheln: lange Grafikbefehle setzt der Treiber sonst als hängend zurück (Context Lost).
+    // Die Größe passt sich nach jedem Durchgang an die gemessene Rechenzeit an.
+    tracer.tiles.set(...tileGrid(width, height, START_TILE_PIXELS))
     // Nur das Pathtracing-Ergebnis zeigen, nicht darunter die normale Darstellung
     tracer.rasterizeScene = false
     // Die Beschleunigungsstruktur in Hintergrund-Threads bauen, damit die Seite bedienbar bleibt
@@ -198,12 +221,45 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
       .setSceneAsync(scene, camera)
       .then(() => {
         if (stopped) return
+        compileOnce(internals._pathTracer.material)
         setState('rendering')
+        // Ein Pixel zurücklesen wartet, bis die Grafikkarte die Kachel fertig hat – so lässt sich
+        // ihre Rechenzeit messen
+        const pixel = new Float32Array(4)
+        let spent = 0 // gemessene Zeit und Pixel im laufenden Durchgang
+        let measured = 0
+        let warmedUp = false
+        let previous = 0
         const loop = () => {
           if (stopped) return
-          tracer.renderSample()
-          // Eine Kachel je Bild; samples zählt anteilig
-          const done = Math.floor(tracer.samples)
+          // Der Shader kompiliert noch: nicht auf die Grafikkarte warten, sonst hängt die Seite
+          if (internals.isCompiling) {
+            frame = requestAnimationFrame(loop)
+            return
+          }
+          const frameStart = performance.now()
+          let done = previous
+          do {
+            const tilePixels = (width / tracer.tiles.x) * (height / tracer.tiles.y)
+            const tileStart = performance.now()
+            tracer.renderSample()
+            renderer.readRenderTargetPixels(tracer.target, 0, 0, 1, 1, pixel)
+            // Die erste Kachel enthält das Hochladen der Szene und zählt nicht
+            if (warmedUp) {
+              spent += performance.now() - tileStart
+              measured += tilePixels
+            }
+            warmedUp = true
+            // samples zählt anteilig je Kachel
+            done = Math.floor(tracer.samples)
+            if (done > previous && measured > 0) {
+              // Durchgang fertig: Kacheln nach der mittleren Zeit je Pixel bemessen, höchstens vervierfachen
+              tracer.tiles.set(...tileGrid(width, height, Math.min((TILE_BUDGET_MS * measured) / spent, tilePixels * 4)))
+              spent = measured = 0
+            }
+            previous = done
+          } while (done < maxSamples && !stopped && performance.now() - frameStart < FRAME_BUDGET_MS)
+          if (stopped) return
           setSamples(done)
           if (done >= maxSamples) {
             setState('done')

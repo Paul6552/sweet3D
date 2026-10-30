@@ -22,7 +22,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Point } from '../model/geometry'
 import { isDialogOpen, openItemDialog } from '../dialogs/dialogStore'
-import { useEditorStore } from '../store/editorStore'
+import { newRoofLevel, roofLevel } from '../model/levels'
+import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { PanelToolbar } from '../editor/PanelFrame'
 import { LevelTabs } from './LevelTabs'
 import { PlanCanvas } from './PlanCanvas'
@@ -49,6 +50,24 @@ export function PlanPanel() {
   const [status, setStatus] = useState<{ cursor: Point | null; hint: string }>({ cursor: null, hint: '' })
   const areaRef = useRef<HTMLDivElement>(null)
 
+  // Dach und Gauben gehören auf das Dach-Niveau: dorthin wechseln, beim Dach es bei Bedarf anlegen
+  const chooseMode = useCallback(
+    (next: PlanMode) => {
+      if (next === 'roof' || next === 'dormer') {
+        const home = useEditorStore.getState().home!
+        const level = roofLevel(home)
+        if (level) {
+          if (home.selectedLevel !== level.id) dispatch({ type: 'selectLevel', id: level.id })
+        } else if (next === 'roof') {
+          const { levels, base } = newRoofLevel(home, t('levels.roofName'), t('levels.defaultName', { n: 0 }))
+          executeCommand({ type: 'addLevels', levels, assignExistingTo: base?.id ?? null })
+        }
+      }
+      setMode(next)
+    },
+    [setMode, t],
+  )
+
   // Tastenkürzel für die Werkzeuge (wie die Buchstaben in den Tooltips)
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -56,11 +75,11 @@ export function PlanPanel() {
       const target = event.target as HTMLElement | null
       if (target?.closest('input, textarea, [data-view3d]') || event.ctrlKey || event.metaKey || event.altKey || isDialogOpen()) return
       const match = MODES.find((m) => m.key.toLowerCase() === event.key.toLowerCase())
-      if (match) setMode(match.mode)
+      if (match) chooseMode(match.mode)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [setMode])
+  }, [chooseMode])
 
   const zoom = (factor: number) => {
     const rect = areaRef.current?.getBoundingClientRect()
@@ -72,7 +91,7 @@ export function PlanPanel() {
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PanelToolbar>
-        <ToggleButtonGroup size="small" exclusive value={mode} onChange={(_, value: PlanMode | null) => value && setMode(value)}>
+        <ToggleButtonGroup size="small" exclusive value={mode} onChange={(_, value: PlanMode | null) => value && chooseMode(value)}>
           {MODES.map(({ mode: m, icon, key }) => (
             <ToggleButton key={m} value={m} aria-label={t(`plan.modes.${m}`)} sx={{ px: 1, py: 0.5 }}>
               <Tooltip title={`${t(`plan.modes.${m}`)} (${key})`}>

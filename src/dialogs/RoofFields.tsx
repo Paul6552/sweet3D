@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Roof, RoofEdge, RoofShape } from '../model/home'
-import { defaultWallHeight } from '../model/levels'
+import { defaultEaveHeight } from '../model/levels'
 import { computeRoof, edgeKind, GABLE, profileFor, ROOF_SHAPES, roofAreas, shapeEdges, type EdgeKind } from '../model/roofs'
 import { NumberInput, ProfileEditor, RoofPreview } from './RoofEditors'
 import { toDegrees, toRadians } from './roofUnits'
@@ -29,7 +29,7 @@ function useShapeField(roofs: Roof[]): Field<Roof> {
   const [edges, setEdges] = useState<RoofEdge[]>(single?.edges ?? [])
   const [edgesDirty, setEdgesDirty] = useState(false)
   const [highlight, setHighlight] = useState<number | null>(null)
-  const wallHeight = single ? defaultWallHeight(home, single.level) : 0
+  const wallHeight = single ? defaultEaveHeight(home, single.level) : 0
   const current = single ? { ...single, edges, shape: shape || single.shape } : null
   const model = useMemo(() => (current ? computeRoof(current, { wallHeight }) : null), [current?.edges, current?.shape, wallHeight]) // eslint-disable-line react-hooks/exhaustive-deps
   const dirty = (shape !== '' && shape !== sharedShape) || edgesDirty
@@ -186,7 +186,7 @@ function useShapeField(roofs: Roof[]): Field<Roof> {
 export function useRoofFields(roofs: Roof[]) {
   const { t } = useTranslation()
   const home = useEditorStore((s) => s.home!)
-  const wallHeight = defaultWallHeight(home, roofs[0]?.level ?? null)
+  const wallHeight = defaultEaveHeight(home, roofs[0]?.level ?? null)
   const name = useTextField(roofs, t('furniture.name'), (r) => r.name, (c, v) => (c.name = v.trim() || null))
   const numbers = [
     useNumberField(roofs, t('roof.baseHeight'), (r) => r.baseHeight, (c, v) => (c.baseHeight = v), { nullable: true, min: 0, placeholder: String(wallHeight) }),

@@ -2,7 +2,8 @@
  * Dächer: aus Traufpolygon und Kantenprofilen werden über das Straight Skeleton (roofSkeleton.ts)
  * die Dachflächen mit Überstand, Dicke und Öffnungen. Alle Höhen relativ zum Boden der Ebene des Dachs.
  */
-import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
+import { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
+import { clipping } from './clipping'
 import { pieceCorners, pitchedSize, pointInPolygon, polygonArea, wallPolygon, type Point } from './geometry'
 import {
   DEFAULT_ROOF_OVERHANG,
@@ -17,7 +18,7 @@ import {
   type RoofShape,
   type Wall,
 } from './home'
-import { defaultWallHeight, levelElevation } from './levels'
+import { defaultEaveHeight, levelElevation } from './levels'
 import { straightSkeleton, type Plane, type Point3, type SkeletonStep } from './roofSkeleton'
 
 export const GABLE = Math.PI / 2
@@ -327,7 +328,7 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
       if (Math.abs(signedArea(plan)) < 0.01) continue
       let clipped: MultiPolygon
       try {
-        clipped = polygonClipping.intersection([closed(plan)], outlinePolygon)
+        clipped = clipping.intersection([closed(plan)], outlinePolygon)
       } catch {
         continue
       }
@@ -348,9 +349,9 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
       const positive = skeleton.top.filter((r) => signedArea(r) > 0).map((r) => [closed(r)] as Polygon)
       const negative = skeleton.top.filter((r) => signedArea(r) < 0).map((r) => [closed(r)] as Polygon)
       try {
-        let top: MultiPolygon = positive.length > 0 ? polygonClipping.union(positive[0], ...positive.slice(1)) : []
-        if (negative.length > 0 && top.length > 0) top = polygonClipping.difference(top, ...negative)
-        top = polygonClipping.intersection(top, outlinePolygon)
+        let top: MultiPolygon = positive.length > 0 ? clipping.union(positive[0], ...positive.slice(1)) : []
+        if (negative.length > 0 && top.length > 0) top = clipping.difference(top, ...negative)
+        top = clipping.intersection(top, outlinePolygon)
         for (const polygon of toRings(top)) {
           surfaces.push({ rings: polygon, plane: { a: 0, b: 0, c: -1, d: -skeleton.zEnd }, slope: 0, dir: [1, 0], up: [0, 1], edge: null, offset: thickness })
         }
@@ -371,16 +372,16 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
         for (const other of above) {
           const below = regionBelow(surface, other.plane)
           if (!below) continue
-          const part = polygonClipping.intersection(region, below, other.rings.map(closed))
+          const part = clipping.intersection(region, below, other.rings.map(closed))
           for (const polygon of part) own.push(polygon)
         }
       }
       for (const other of context.clipUnder ?? []) {
         const below = regionBelow(surface, other.plane)
         if (!below) continue
-        for (const polygon of polygonClipping.intersection(below, other.rings.map(closed))) own.push(polygon)
+        for (const polygon of clipping.intersection(below, other.rings.map(closed))) own.push(polygon)
       }
-      if (own.length > 0) shape = polygonClipping.difference(shape, ...own)
+      if (own.length > 0) shape = clipping.difference(shape, ...own)
     } catch {
       // Bei ungültigen Öffnungen die Fläche ganz lassen
     }
@@ -395,7 +396,7 @@ export function computeRoof(roof: Roof, context: RoofContext): RoofModel {
     const width = 20
     const inner = outline.map((ring) => offsetRing(ring, ring.map(() => -width)))
     try {
-      const area = polygonClipping.difference(outlinePolygon, [closed(inner[0])])
+      const area = clipping.difference(outlinePolygon, [closed(inner[0])])
       parapet = { rings: toRings(area).flat(), top: eave + thickness + roof.parapet }
     } catch {
       parapet = null
@@ -410,7 +411,7 @@ const rawCache = new WeakMap<Roof, { wallHeight: number; model: RoofModel }>()
 
 /** Dach ohne Öffnungen und Gauben; zwischengespeichert, solange sich das Dach nicht ändert. */
 export function rawRoofModel(home: Pick<Home, 'levels' | 'wallHeight'>, roof: Roof): RoofModel {
-  const wallHeight = defaultWallHeight(home as Home, roof.level)
+  const wallHeight = defaultEaveHeight(home, roof.level)
   const cached = rawCache.get(roof)
   if (cached && cached.wallHeight === wallHeight) return cached.model
   const model = computeRoof(roof, { wallHeight })
@@ -438,7 +439,7 @@ export function roofModels(home: Pick<Home, 'levels' | 'wallHeight' | 'roofs'>, 
     result.set(
       roof.id,
       computeRoof(roof, {
-        wallHeight: defaultWallHeight(home as Home, roof.level),
+        wallHeight: defaultEaveHeight(home, roof.level),
         holes: extraHoles,
         cutBelow: dormers.map((dormer) => ({ region: [closed(dormer.points)], surfaces: rawRoofModel(home, dormer).surfaces })),
         clipUnder: main ? rawRoofModel(home, main).surfaces : undefined,
@@ -795,7 +796,7 @@ export function outlineFromWalls(walls: Wall[], point: Point): { points: Point[]
   const polygons: Polygon[] = walls.map((w) => [closed(wallPolygon(w, byId))])
   let union: MultiPolygon
   try {
-    union = polygonClipping.union(polygons[0], ...polygons.slice(1))
+    union = clipping.union(polygons[0], ...polygons.slice(1))
   } catch {
     return null
   }
@@ -822,7 +823,7 @@ export function wallsUnderRoofEdge(walls: Wall[], roof: Roof): Wall[] {
 
 /** Höhen des Dachs im Bezug der Ebene. */
 export function roofContext(home: Home, roof: Roof): RoofContext {
-  return { wallHeight: defaultWallHeight(home, roof.level) }
+  return { wallHeight: defaultEaveHeight(home, roof.level) }
 }
 
 /** Absolute Höhe des Bodens der Ebene eines Dachs. */
@@ -865,16 +866,16 @@ export function wallCaps(
     .sort((a, b) => a.model.eave + a.shift - (b.model.eave + b.shift))
   for (const { model, shift } of roofs) {
     for (const surface of model.surfaces) {
-      let area = tryClip(() => polygonClipping.intersection(wall, surface.rings.map(closed) as Polygon), [])
+      let area = tryClip(() => clipping.intersection(wall, surface.rings.map(closed) as Polygon), [])
       if (area.length === 0) continue
-      if (assigned.length > 0) area = tryClip(() => polygonClipping.difference(area, assigned), area)
+      if (assigned.length > 0) area = tryClip(() => clipping.difference(area, assigned), area)
       if (area.length === 0) continue
-      assigned = tryClip(() => polygonClipping.union(assigned, area), [...assigned, ...area])
+      assigned = tryClip(() => clipping.union(assigned, area), [...assigned, ...area])
       caps.push({ area, height: underside(surface, shift) })
     }
   }
   // Ohne Rest überdecken sich höchstens Teile; die höhere Kappe verdeckt dann die niedrigere
-  const rest = assigned.length > 0 ? tryClip(() => polygonClipping.difference(wall, assigned), [wall]) : [wall]
+  const rest = assigned.length > 0 ? tryClip(() => clipping.difference(wall, assigned), [wall]) : [wall]
   if (rest.length > 0) caps.push({ area: rest, height: [0, 0, height] })
   if (!standOn) return caps
   // Wände einer Gaube stehen auf der Unterseite des Hauptdachs
@@ -885,10 +886,10 @@ export function wallCaps(
     for (const surface of standOn.model.surfaces) {
       if (rest.length === 0) break
       const ring = surface.rings.map(closed) as Polygon
-      const area = tryClip(() => polygonClipping.intersection(rest, ring), [])
+      const area = tryClip(() => clipping.intersection(rest, ring), [])
       if (area.length === 0) continue
       parts.push({ ...cap, area, bottom: underside(surface, shift) })
-      rest = tryClip(() => polygonClipping.difference(rest, ring), [])
+      rest = tryClip(() => clipping.difference(rest, ring), [])
     }
     if (rest.length > 0) parts.push({ ...cap, area: rest })
     return parts

@@ -1,4 +1,5 @@
-import polygonClipping, { type Polygon, type Ring } from 'polygon-clipping'
+import { type Polygon, type Ring } from 'polygon-clipping'
+import { clipping } from '../model/clipping'
 import { Shape, ShapeGeometry } from 'three'
 import { SVGLoader } from 'three/examples/jsm/loaders/SVGLoader.js'
 import type { Home, HomePiece } from '../model/home'
@@ -68,7 +69,7 @@ export function roomGeometry(points: [number, number][], holes: Polygon[]): Shap
   const outline: Polygon = [[...points, points[0]]]
   let cut = null
   try {
-    if (holes.length > 0 && points.length >= 3) cut = polygonClipping.difference(outline, ...holes)
+    if (holes.length > 0 && points.length >= 3) cut = clipping.difference(outline, ...holes)
   } catch {
     // Ungültiger Umriss (z. B. sich selbst schneidend): Raum ohne Öffnung zeichnen
   }

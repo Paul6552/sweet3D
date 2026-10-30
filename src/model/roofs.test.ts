@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Point } from './geometry'
 import type { Roof } from './home'
-import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
+import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, rawRoofModel, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
 import { pointInPolygon, polygonArea, wallPolygon } from './geometry'
+import { createEmptyHome } from './home'
+import { newRoofLevel } from './levels'
+import { applyCommand } from './commands'
 
 const deg = (d: number) => (d * Math.PI) / 180
 const rect = (w: number, l: number): Point[] => [
@@ -243,6 +246,14 @@ describe('Leicht versetzte Wände', () => {
     expect(computeRoof(r, { wallHeight: 250 }).ridge).toBeGreaterThan(250 + 900 * Math.tan(deg(40)))
   })
 
+  it('Keine Dachfläche geht beim Zuschneiden verloren (Rechenfehler von polygon-clipping)', () => {
+    const corners = cornerIndices(outline).map((i) => outline[i])
+    const r = { ...roof(corners), overhang: 40, thickness: 25 }
+    const sloped = r.edges.map((e, i) => (e.profile ? -1 : i)).filter((i) => i >= 0)
+    const model = computeRoof(r, { wallHeight: 250 })
+    expect(new Set(model.surfaces.map((s) => s.edge))).toEqual(new Set(sloped))
+  })
+
   it('Satteldach: Teilstücke einer Seite bekommen dieselbe Kantenart', () => {
     const r = roof(outline)
     const kinds = r.edges.map((e) => !!e.profile)
@@ -250,5 +261,29 @@ describe('Leicht versetzte Wände', () => {
     expect(kinds[14]).toBe(kinds[15])
     // Kein Giebel auf einem Teilstück der Nordseite
     expect(kinds[7]).toBe(false)
+  })
+})
+
+describe('Dach-Niveau', () => {
+  it('liegt über dem obersten Niveau, die Traufe auf seinem Fußboden', () => {
+    const home = createEmptyHome()
+    const { levels, base } = newRoofLevel(home, 'Dach', 'Ebene 0')
+    expect(base).not.toBeNull()
+    const [ground, roofFloor] = levels
+    expect(roofFloor).toMatchObject({ name: 'Dach', roof: true, elevation: ground.elevation + ground.height + roofFloor.floorThickness })
+    home.levels = levels
+    const r = { ...roof(rect(800, 1200)), level: roofFloor.id }
+    expect(rawRoofModel(home, r).eave).toBeCloseTo(0, 5)
+    expect(rawRoofModel(home, { ...r, level: ground.id }).eave).toBeCloseTo(ground.height, 5)
+  })
+
+  it('wird mit seinen Dächern gelöscht', () => {
+    const home = createEmptyHome()
+    const { levels } = newRoofLevel(home, 'Dach', 'Ebene 0')
+    home.levels = levels
+    home.roofs = [{ ...roof(rect(800, 1200)), level: levels[1].id }]
+    applyCommand(home, { type: 'deleteLevel', id: levels[1].id })
+    expect(home.roofs).toEqual([])
+    expect(home.levels.map((l) => l.id)).toEqual([levels[0].id])
   })
 })

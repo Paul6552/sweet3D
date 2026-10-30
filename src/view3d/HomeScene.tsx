@@ -190,6 +190,13 @@ function LevelScene({
   const wallsById = useMemo(() => new Map(levelWalls.map((w) => [w.id, w])), [levelWalls])
   // Dachfenster schneiden das Dach, nicht die Wände
   const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow && !p.roofId), [levelFurniture])
+  // Wände reichen nur bis zu Dächern, die gerade zu sehen sind: Ist das Dach-Niveau ausgeblendet, enden
+  // auch die Giebel, damit man das Geschoss darunter bearbeiten kann
+  const shownLevels = visibleLevels(home).map((l) => l?.id ?? null).join(' ')
+  const capRoofs = useMemo(() => {
+    const shown = new Set(shownLevels.split(' '))
+    return { levels: home.levels, roofs: home.roofs.filter((r) => r.level === levelId || shown.has(r.level ?? '')) }
+  }, [home.levels, home.roofs, shownLevels, levelId])
   const walls = useMemo(
     () =>
       levelWalls.map((wall) => {
@@ -197,11 +204,11 @@ function LevelScene({
         const main = home.roofs.find((r) => r.dormer?.wallIds.includes(wall.id))?.dormer?.roofId
         const mainRoof = main ? home.roofs.find((r) => r.id === main) : undefined
         const standOn = mainRoof ? { model: rawRoofModel(home, mainRoof), level: mainRoof.level } : undefined
-        const caps = wall.toRoof ? wallCaps(home, roofs, levelId, wallPolygon(wall, wallsById), wall.height ?? height, standOn) : undefined
+        const caps = wall.toRoof ? wallCaps(capRoofs, roofs, levelId, wallPolygon(wall, wallsById), wall.height ?? height, standOn) : undefined
         return { wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById, floorThickness, caps) }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- von home zählen nur Ebenen und Dächer (in roofs)
-    [levelWalls, height, doorsAndWindows, wallsById, floorThickness, roofs, home.levels, levelId],
+    [levelWalls, height, doorsAndWindows, wallsById, floorThickness, roofs, capRoofs, levelId],
   )
   // Öffnungen der Treppen: im Boden von Treppen, die von unten durch die Decke darunter kommen,
   // in der Decke von Treppen, die höher als die Decke reichen

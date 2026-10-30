@@ -1,4 +1,5 @@
-import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
+import { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping'
+import { clipping } from '../model/clipping'
 import { ExtrudeGeometry, Path, Shape, type BufferGeometry } from 'three'
 import type { HomePiece, Wall } from '../model/home'
 import { pieceCorners, wallPolygon, type Point } from '../model/geometry'
@@ -61,7 +62,7 @@ export function wallSlices(
   const openings = doorsAndWindows
     .filter((p) => p.visible)
     .map((piece) => ({ piece, area: cutOut(piece, wall.thickness) }))
-    .filter(({ area }) => polygonClipping.intersection(outline, [area]).length > 0)
+    .filter(({ area }) => clipping.intersection(outline, [area]).length > 0)
 
   // Höchster Punkt der Oberkante: bei linearer Höhe an einer Ecke der Teilfläche
   const tops = parts.map(({ area, height: h }) => Math.max(...area.flatMap((poly) => poly[0].map((p) => linearZ(h, p as Point)))))
@@ -99,7 +100,7 @@ export function wallSlices(
     const sliceTop = sorted[i + 1]
     if (sliceTop - bottom < 1e-6) continue
     const active = openings.filter(({ piece }) => piece.elevation <= bottom && piece.elevation + piece.height >= sliceTop)
-    const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? tryClip(() => polygonClipping.difference(area, ...active.map(({ area }) => [area] as Polygon)), area) : area)
+    const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? tryClip(() => clipping.difference(area, ...active.map(({ area }) => [area] as Polygon)), area) : area)
     const full: MultiPolygon[] = []
     for (const cap of parts) {
       const [gx, gy, g0] = cap.height
@@ -112,10 +113,10 @@ export function wallSlices(
       const over = halfPlane(-gx, -gy, g0 - bottom, polygon)
       const under = cap.bottom ? halfPlane(cap.bottom[0], cap.bottom[1], sliceTop - cap.bottom[2], polygon) : null
       if (!over || (cap.bottom && !under)) continue
-      const area = tryClip(() => polygonClipping.intersection(cap.area, over, ...(under ? [under] : [])), [])
+      const area = tryClip(() => clipping.intersection(cap.area, over, ...(under ? [under] : [])), [])
       if (area.length > 0) add(cut(area), bottom, sliceTop, cap)
     }
-    if (full.length > 0) add(cut(full.length === 1 ? full[0] : tryClip(() => polygonClipping.union(full[0], ...full.slice(1)), full.flat())), bottom, sliceTop, null)
+    if (full.length > 0) add(cut(full.length === 1 ? full[0] : tryClip(() => clipping.union(full[0], ...full.slice(1)), full.flat())), bottom, sliceTop, null)
   }
   return slices
 }

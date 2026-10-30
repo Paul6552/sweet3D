@@ -1,6 +1,5 @@
 import Box from '@mui/material/Box'
 import { produce } from 'immer'
-import polygonClipping, { type Polygon } from 'polygon-clipping'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Layer, Stage } from 'react-konva'
 import { useTranslation } from 'react-i18next'
@@ -268,6 +267,12 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   )
   const belowId = levelBelow(fullHome)?.id
   const wallsBelow = useMemo(() => (belowId ? fullHome.walls.filter((w) => w.level === belowId) : undefined), [fullHome.walls, belowId])
+  // Dächer entstehen nur auf dem Dach-Niveau, über den Wänden und Räumen des Niveaus darunter
+  const onRoofLevel = !!fullHome.levels.find((l) => l.id === fullHome.selectedLevel)?.roof
+  const homeBelow = useMemo(
+    () => ({ ...fullHome, walls: wallsBelow ?? [], rooms: belowId ? fullHome.rooms.filter((r) => r.level === belowId) : [] }),
+    [fullHome, wallsBelow, belowId],
+  )
   // Dächer tieferer Ebenen, die in diese reichen: blass, mit der Linie 1 m über dem Boden (Kniestock)
   const roofsBelow = useMemo(() => {
     const level = fullHome.levels.find((l) => l.id === fullHome.selectedLevel)
@@ -392,10 +397,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     (points: Point[]) => {
       const unique = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5)
       if (unique.length > 2 && distance(unique[0], unique.at(-1)!) < 0.5) unique.pop()
-      if (unique.length >= 3) addRoof(unique)
+      if (unique.length >= 3) addRoof(unique, homeBelow.walls)
       setRoofPoints([])
     },
-    [addRoof],
+    [addRoof, homeBelow],
   )
 
   // Tastatur: Esc bricht ab, Enter beendet einen Raum, Leertaste zum Verschieben der Ansicht
@@ -495,7 +500,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       const snapped = magnet ? snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : point
       setRoomPoints((points) => [...points, roundPoint(snapped)])
     } else if (mode === 'roof') {
-      const snapped = magnet ? snapToPoints(point, [...roomSnapPoints(home), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : point
+      if (!onRoofLevel) return
+      const snapped = magnet ? snapToPoints(point, [...roomSnapPoints(homeBelow), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : point
       setRoofPoints((points) => [...points, roundPoint(snapped)])
     } else if (mode === 'dormer') {
       // Oberstes Dach (keine Gaube) unter dem Punkt
@@ -598,6 +604,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     } else if (mode === 'wall') {
       setChain(null)
     } else if (mode === 'roof') {
+      if (!onRoofLevel) return
       const points = roofPoints.filter((p, i) => i === 0 || distance(p, roofPoints[i - 1]) > 0.5)
       setRoofPoints([])
       if (points.length >= 3) {
@@ -605,33 +612,20 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         return
       }
       const point = toPlan(event.clientX, event.clientY)
-      // Doppelklick auf ein vorhandenes Dach dieser Ebene: auswählen statt ein zweites darüberzulegen
-      const existing = home.roofs.find((r) => !r.dormer && r.level === home.selectedLevel && pointInPolygon(point, r.points))
+      // Doppelklick auf ein vorhandenes Dach: auswählen statt ein zweites darüberzulegen
+      const existing = home.roofs.find((r) => !r.dormer && pointInPolygon(point, r.points))
       if (existing) {
         dispatch({ type: 'select', ids: [existing.id] })
         return
       }
-      // Doppelklick in ausgewählte Räume: Dach über ihre Vereinigung
-      const selectedRooms = home.rooms.filter((r) => selection.includes(r.id))
-      if (selectedRooms.some((r) => pointInPolygon(point, r.points))) {
-        try {
-          const polygons: Polygon[] = selectedRooms.map((r) => [[...r.points, r.points[0]]])
-          const union = polygonClipping.union(polygons[0], ...polygons.slice(1))
-          const part = union.find((p) => pointInPolygon(point, p[0].slice(0, -1) as Point[])) ?? union[0]
-          if (part) addRoof(part[0].slice(0, -1) as Point[], walls)
-        } catch {
-          // Ungültige Räume: kein Dach
-        }
-        return
-      }
-      // Doppelklick in ein Haus: Dach über den Außenumriss seiner Wände
-      const outline = outlineFromWalls(walls, point)
+      // Doppelklick in ein Haus: Dach über den Außenumriss der Wände darunter, sonst über den Raum
+      const outline = outlineFromWalls(homeBelow.walls, point)
       if (outline) {
-        addRoof(outline.points, walls)
+        addRoof(outline.points, homeBelow.walls)
         return
       }
-      const room = [...home.rooms].reverse().find((r) => pointInPolygon(point, r.points))
-      if (room) addRoof(room.points, walls)
+      const room = [...homeBelow.rooms].reverse().find((r) => pointInPolygon(point, r.points))
+      if (room) addRoof(room.points, homeBelow.walls)
     } else if (mode === 'room') {
       const points = roomPoints.filter((p, i) => i === 0 || distance(p, roomPoints[i - 1]) > 0.5)
       if (points.length >= 3) {
@@ -693,7 +687,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     preview.roomPoints = [...roomPoints, next]
   }
   if (mode === 'roof' && roofPoints.length > 0 && pointer) {
-    const next = magnetNow ? snapToPoints(pointer.point, [...roomSnapPoints(home), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : pointer.point
+    const next = magnetNow ? snapToPoints(pointer.point, [...roomSnapPoints(homeBelow), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : pointer.point
     preview.roofPoints = [...roofPoints, next]
   }
   if (mode === 'dimension' && dimension && pointer) {
@@ -724,7 +718,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       : mode === 'room'
         ? t(roomPoints.length > 0 ? 'plan.hints.roomNext' : 'plan.hints.roomStart')
         : mode === 'roof'
-          ? t(roofPoints.length > 0 ? 'plan.hints.roofNext' : 'plan.hints.roofStart')
+          ? t(!onRoofLevel ? 'plan.hints.roofLevel' : roofPoints.length > 0 ? 'plan.hints.roofNext' : 'plan.hints.roofStart')
         : mode === 'dormer'
           ? t('plan.hints.dormer')
         : mode === 'dimension'

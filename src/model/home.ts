@@ -243,6 +243,8 @@ export interface Level {
   /** Standardhöhe der Wände dieser Ebene. */
   height: number
   viewable: boolean
+  /** Dach-Niveau: nimmt die Dächer über dem Niveau darunter auf (Dach-Werkzeug). */
+  roof?: boolean
 }
 
 /** Virtueller Besucher (Augenposition im Plan, Blickrichtung). */

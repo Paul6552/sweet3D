@@ -24,6 +24,8 @@ export const ROOF_PROPERTY = 'sweet3d.roof'
 export const TO_ROOF_PROPERTY = 'sweet3d.toRoof'
 /** Dach, in dem ein Dachfenster sitzt. */
 export const ROOF_ID_PROPERTY = 'sweet3d.roofId'
+/** Dach-Niveau des Dach-Werkzeugs. */
+export const ROOF_LEVEL_PROPERTY = 'sweet3d.roofLevel'
 
 export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
 
@@ -238,18 +240,19 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
     // Standard-Luftansicht von Sweet Home 3D; die Desktop-App richtet sie beim Öffnen selbst aus
     `  ${element('camera', { attribute: 'topCamera', lens: 'PINHOLE', x: 50, y: 1050, z: 1010, yaw: Math.PI, pitch: Math.PI / 4, fieldOfView: (63 * Math.PI) / 180, time })}`,
     // Ebenen vor allem, was auf sie verweist; elevationIndex ordnet Ebenen gleicher Höhe
-    ...home.levels.map(
-      (level, index) =>
-        `  ${element('level', {
-          id: level.id,
-          name: level.name,
-          elevation: level.elevation,
-          floorThickness: level.floorThickness,
-          height: level.height,
-          elevationIndex: home.levels.filter((l, i) => i < index && l.elevation === level.elevation).length,
-          viewable: level.viewable ? null : false,
-        })}`,
-    ),
+    ...home.levels.map((level, index) => {
+      const attributes = {
+        id: level.id,
+        name: level.name,
+        elevation: level.elevation,
+        floorThickness: level.floorThickness,
+        height: level.height,
+        elevationIndex: home.levels.filter((l, i) => i < index && l.elevation === level.elevation).length,
+        viewable: level.viewable ? null : false,
+      }
+      if (!level.roof) return `  ${element('level', attributes)}`
+      return `  ${openTag('level', attributes)}>\n    ${element('property', { name: ROOF_LEVEL_PROPERTY, value: 'true' })}\n  </level>`
+    }),
     ...pieces.map((p) => `  ${p}`),
     ...roofPieces.filter((p) => p !== null),
     ...walls,

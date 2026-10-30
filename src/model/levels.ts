@@ -15,6 +15,20 @@ export function levelElevation(home: Home, id: string | null): number {
   return findLevel(home, id)?.elevation ?? 0
 }
 
+/**
+ * Traufhöhe von Dächern ohne eigene Angabe: auf dem Dach-Niveau dessen Fußboden (die Oberkante der
+ * Wände darunter samt Decke), sonst die Wandhöhe der Ebene.
+ */
+export function defaultEaveHeight(home: Pick<Home, 'levels' | 'wallHeight'>, id: string | null): number {
+  const level = findLevel(home as Home, id)
+  return level?.roof ? 0 : (level?.height ?? home.wallHeight)
+}
+
+/** Das Dach-Niveau des Projekts, falls angelegt. */
+export function roofLevel(home: Pick<Home, 'levels'>): Level | null {
+  return home.levels.find((l) => l.roof) ?? null
+}
+
 /** Standardhöhe für Wände ohne eigene Höhe. */
 export function defaultWallHeight(home: Home, id: string | null): number {
   return findLevel(home, id)?.height ?? home.wallHeight
@@ -91,4 +105,11 @@ export function newLevels(home: Home, name: (index: number) => string): { levels
     viewable: true,
   }
   return { levels: base ? [base, level] : [level], base }
+}
+
+/** Neues Dach-Niveau über dem obersten (mit Ebene 0, falls das Projekt noch keine Ebenen hat). */
+export function newRoofLevel(home: Home, name: string, baseName: string): { levels: Level[]; base: Level | null } {
+  const { levels, base } = newLevels(home, () => baseName)
+  const roof = levels[levels.length - 1]
+  return { levels: [...levels.slice(0, -1), { ...roof, name, roof: true }], base }
 }

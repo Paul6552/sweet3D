@@ -21,7 +21,7 @@ import {
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
-import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
+import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_LEVEL_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -94,6 +94,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       height: num(e, 'height') ?? home.wallHeight,
       // „visible“ leitet Sweet Home 3D aus der gewählten Ebene ab; nur „viewable“ stellt der Nutzer ein
       viewable: e.getAttribute('viewable') !== 'false',
+      ...(property(e, ROOF_LEVEL_PROPERTY) === 'true' && { roof: true }),
     })),
   )
   const levelIds = new Set(home.levels.map((l) => l.id))

@@ -84,6 +84,9 @@ export function surfaceMaterial(surface: Surface | null | undefined, fallback: s
   return material
 }
 
+/** Deckkraft von Glas mit Bild (z. B. getönte Glastüren); das Bild färbt nur noch ein. */
+const TINTED_GLASS_OPACITY = 0.3
+
 /** Rohwerte einer MTL-Datei je Material, wie MTLLoader sie liest (Schlüssel klein geschrieben). */
 export type MtlInfo = Record<string, string | number[] | undefined>
 
@@ -91,7 +94,8 @@ export type MtlInfo = Record<string, string | number[] | undefined>
  * Wandelt die Phong-Materialien des MTLLoaders in physikalisch basierte Materialien, damit Modelle
  * vom Umgebungslicht beleuchtet werden und je nach Glanz spiegeln. Rauheit und Metall stammen,
  * soweit vorhanden, aus den PBR-Erweiterungen der MTL-Datei (Pr, Pm, map_Pr, map_Pm, map_ao),
- * sonst aus Glanz (Ns) und Glanzfarbe (Ks). Halbtransparente Materialien ohne Bild werden zu Glas.
+ * sonst aus Glanz (Ns) und Glanzfarbe (Ks). Halbtransparente Materialien ohne Bild werden zu Glas,
+ * mit Bild nur bei einem Brechungsindex (Ni) über 1, wie die Scheibe der rahmenlosen Glastür.
  */
 export function toPbr(source: Material, info: MtlInfo | undefined, loadMap: (path: string) => Texture): Material {
   // OBJ und 3DS liefern Phong-, Collada auch Lambert-Materialien; glTF ist schon physikalisch basiert
@@ -120,7 +124,7 @@ export function toPbr(source: Material, info: MtlInfo | undefined, loadMap: (pat
   if (specular < 0.05) roughness = Math.max(roughness, 0.75)
   roughness = number('pr') ?? roughness
   const metalness = number('pm') ?? 0
-  const glass = source.transparent && source.opacity < 1 && !source.map
+  const glass = source.transparent && source.opacity < 1 && (!source.map || (number('ni') ?? 1) > 1)
   const parameters = {
     name: source.name,
     color: source.color,
@@ -147,7 +151,15 @@ export function toPbr(source: Material, info: MtlInfo | undefined, loadMap: (pat
     if (texture) texture.anisotropy = MAX_ANISOTROPY
   }
   const result = glass
-    ? new MeshPhysicalMaterial({ ...parameters, roughness: Math.min(roughness, 0.05), metalness: 0, ior: 1.5, envMapIntensity: 1.5, depthWrite: false })
+    ? new MeshPhysicalMaterial({
+        ...parameters,
+        opacity: source.map ? Math.min(source.opacity, TINTED_GLASS_OPACITY) : source.opacity,
+        roughness: Math.min(roughness, 0.05),
+        metalness: 0,
+        ior: 1.5,
+        envMapIntensity: 1.5,
+        depthWrite: false,
+      })
     : new MeshStandardMaterial(parameters)
   // Im Foto-Modus wird Glas lichtbrechend (siehe PhotoDialog)
   if (glass) result.userData.glass = true

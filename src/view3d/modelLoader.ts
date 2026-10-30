@@ -13,8 +13,10 @@ import {
   MeshPhongMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
+  ShapeUtils,
   SkinnedMesh,
   TextureLoader,
+  Vector2,
   Vector3,
   type Object3D,
 } from 'three'
@@ -295,13 +297,72 @@ async function parseObj(text: string, base: string, manager: LoadingManager): Pr
     create: (name: string) => own?.materials[name] ?? own?.create(name) ?? defaults.create(name),
     preload: () => {},
   } as unknown as MaterialCreator
-  const object = new OBJLoader().setMaterials(materials).parse(text)
+  const object = new OBJLoader().setMaterials(materials).parse(triangulateConcaveFaces(text))
   // PBR-Erweiterungen der MTL-Datei für toPbr merken
   const info = (own?.materialsInfo ?? {}) as Record<string, MtlInfo>
   object.traverse((child) => {
     if (child instanceof Mesh) child.userData.mtl = info
   })
   return object
+}
+
+/**
+ * Zerlegt nicht konvexe Flächen einer OBJ-Datei in Dreiecke. Der OBJLoader zerlegt Vielecke als
+ * Fächer von der ersten Ecke aus; bei einem U (z. B. Vorderseite eines Türrahmens) füllt das die
+ * Öffnung. Konvexe Flächen bleiben, wie sie sind.
+ */
+export function triangulateConcaveFaces(text: string): string {
+  const lines = text.split('\n')
+  const vertices: Vector3[] = []
+  let changed = false
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n]
+    if (line.startsWith('v ')) {
+      const [x, y, z] = line.trim().split(/\s+/).slice(1, 4).map(Number)
+      vertices.push(new Vector3(x, y, z))
+      continue
+    }
+    if (!line.startsWith('f ')) continue
+    const corners = line.trim().split(/\s+/).slice(1)
+    if (corners.length < 4) continue
+    const points = corners.map((corner) => {
+      const index = Number.parseInt(corner, 10)
+      return vertices[index < 0 ? vertices.length + index : index - 1]
+    })
+    if (points.some((p) => !p)) continue
+    // Ebene der Fläche (Newell-Normale); projiziert wird auf die beiden übrigen Achsen
+    const normal = new Vector3()
+    points.forEach((p, i) => {
+      const q = points[(i + 1) % points.length]
+      normal.x += (p.y - q.y) * (p.z + q.z)
+      normal.y += (p.z - q.z) * (p.x + q.x)
+      normal.z += (p.x - q.x) * (p.y + q.y)
+    })
+    const axis = Math.abs(normal.x) > Math.abs(normal.y) ? (Math.abs(normal.x) > Math.abs(normal.z) ? 'x' : 'z') : Math.abs(normal.y) > Math.abs(normal.z) ? 'y' : 'z'
+    const contour = points.map((p) => (axis === 'x' ? new Vector2(p.y, p.z) : axis === 'y' ? new Vector2(p.z, p.x) : new Vector2(p.x, p.y)))
+    let sign = 0
+    let convex = true
+    for (let i = 0; i < contour.length && convex; i++) {
+      const a = contour[i]
+      const b = contour[(i + 1) % contour.length]
+      const c = contour[(i + 2) % contour.length]
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+      if (Math.abs(cross) < 1e-12) continue
+      if (sign === 0) sign = Math.sign(cross)
+      else if (Math.sign(cross) !== sign) convex = false
+    }
+    if (convex) continue
+    const triangles = ShapeUtils.triangulateShape(contour, [])
+    if (triangles.length === 0) continue
+    // Umlaufsinn der Fläche beibehalten (bestimmt die Normale)
+    const orientation = Math.sign(ShapeUtils.area(contour))
+    lines[n] = triangles
+      .map(([a, b, c]) => (Math.sign(ShapeUtils.area([contour[a], contour[b], contour[c]])) === orientation ? [a, b, c] : [a, c, b]))
+      .map((triangle) => `f ${triangle.map((i) => corners[i]).join(' ')}`)
+      .join('\n')
+    changed = true
+  }
+  return changed ? lines.join('\n') : text
 }
 
 /**

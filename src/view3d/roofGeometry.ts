@@ -1,11 +1,17 @@
 import { BufferGeometry, Float32BufferAttribute, ShapeUtils, Vector2 } from 'three'
 import type { Point } from '../model/geometry'
+import type { Roof } from '../model/home'
 import { planeZ, type RoofModel, type RoofSurface } from '../model/roofs'
 
 /** Materialgruppen eines Dachs: Deckung, Untersicht, Stirnseiten (Traufe, Ortgang, Öffnungen, Attika). */
 export const ROOF_TOP = 0
 export const ROOF_BOTTOM = 1
 export const ROOF_SIDES = 2
+/** Farben je Gruppe ohne eigene Oberfläche. */
+export const ROOF_COLORS = ['#9c4a33', '#e6dccd', '#f3efe8']
+
+/** Oberflächen eines Dachs in der Reihenfolge der Gruppen. */
+export const roofSurfaces = (roof: Roof) => [roof.top, roof.underside, roof.sides]
 
 class Builder {
   positions: number[][] = [[], [], []]

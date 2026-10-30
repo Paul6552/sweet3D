@@ -5,6 +5,9 @@ import { contentBlobs } from '../storage/contents'
 import { formatArgb } from '../model/colors'
 import type { Home, HomePiece, LibraryInfo, Surface, TextureMaps, TextureRef } from '../model/home'
 import { defaultWallHeight, levelElevation } from '../model/levels'
+import { roofModels } from '../model/roofs'
+import { ROOF_COLORS, roofGeometry, roofSurfaces } from '../view3d/roofGeometry'
+import { roofObj } from './roofObj'
 import { fromObserverPitch, fromObserverYaw } from './sh3dCamera'
 
 /** Modell für Möbel ohne ladbares Modell, damit Sweet Home 3D die Datei öffnen kann. */
@@ -15,6 +18,10 @@ export const LIBRARIES_PROPERTY = 'sweet3d.libraries'
 export const LIBRARY_ID_PROPERTY = 'sweet3d.libraryId'
 /** Zu Texturbildern (Eintrag im ZIP) die Einträge ihrer PBR-Karten und ihre Bibliothek. */
 export const TEXTURE_EXTRAS_PROPERTY = 'sweet3d.textureExtras'
+/** Dach als JSON an seinem Ersatzmöbel; beim Import wird daraus wieder ein Dach. */
+export const ROOF_PROPERTY = 'sweet3d.roof'
+/** Wand, deren Oberkante dem Dach folgt. */
+export const TO_ROOF_PROPERTY = 'sweet3d.toRoof'
 
 export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
 
@@ -72,6 +79,56 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
     return name
   }
 
+  /** Inhalt hinter einem Verweis als Bytes, z. B. für Texturen eines erzeugten Modells. */
+  const bytesOf = async (ref: string): Promise<Uint8Array | null> => {
+    if (!isContentRef(ref)) return fetchBytes(ref)
+    const [entry] = await contentBlobs(contentKey(ref), false)
+    return entry ? new Uint8Array(await entry[1].arrayBuffer()) : null
+  }
+
+  /**
+   * Dächer als Möbel mit erzeugtem Modell, damit Sweet Home 3D sie zeigt; die Daten des Dachs stehen
+   * in einer Eigenschaft, aus der der Import wieder ein bearbeitbares Dach macht.
+   */
+  const models = roofModels(home)
+  const roofPieces = await Promise.all(
+    home.roofs.map(async (roof) => {
+      const model = models.get(roof.id)
+      const geometry = model && model.surfaces.length > 0 ? roofGeometry(model) : null
+      const property = `    ${element('property', { name: ROOF_PROPERTY, value: JSON.stringify(roof) })}`
+      const name = roof.name ?? 'Roof'
+      const generated = geometry ? roofObj(geometry, roofSurfaces(roof), ROOF_COLORS, name) : null
+      geometry?.dispose()
+      if (!generated || !Number.isFinite(generated.min[0])) return null
+      const directory = `${next++}/`
+      entries[`${directory}roof.obj`] = strToU8(generated.obj)
+      entries[`${directory}roof.mtl`] = strToU8(generated.mtl)
+      await Promise.all(
+        [...generated.textures].map(async ([file, texture]) => {
+          const bytes = await bytesOf(texture.image).catch(() => null)
+          if (bytes) entries[directory + file] = bytes
+        }),
+      )
+      const { min, max } = generated
+      const attributes = {
+        id: roof.id,
+        level: roof.level,
+        name,
+        creator: 'Sweet3D',
+        model: `${directory}roof.obj`,
+        x: (min[0] + max[0]) / 2,
+        y: (min[2] + max[2]) / 2,
+        elevation: min[1],
+        width: max[0] - min[0],
+        depth: max[2] - min[2],
+        height: max[1] - min[1],
+        movable: false,
+        visible: roof.visible ? null : false,
+      }
+      return [`  ${openTag('pieceOfFurniture', attributes)}>`, property, '  </pieceOfFurniture>'].join('\n')
+    }),
+  )
+
   /** Element „texture“ wie TextureImage in Home.xml; das Bild kommt als Eintrag ins ZIP. */
   const textureExtras: TextureExtras = {}
   const texture = async (ref: TextureRef | null | undefined, attribute: string | null, indent: string): Promise<string[]> => {
@@ -117,7 +174,10 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
           rightSideColor: color(wall.rightSide),
         }),
         'wall',
-        [...(await texture(wall.leftSide?.texture, 'leftSideTexture', '    ')), ...(await texture(wall.rightSide?.texture, 'rightSideTexture', '    '))],
+        [
+          ...(wall.toRoof ? [`    ${element('property', { name: TO_ROOF_PROPERTY, value: 'true' })}`] : []),
+          ...(await texture(wall.leftSide?.texture, 'leftSideTexture', '    ')), ...(await texture(wall.rightSide?.texture, 'rightSideTexture', '    ')),
+        ],
       ),
     ),
   )
@@ -189,6 +249,7 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
         })}`,
     ),
     ...pieces.map((p) => `  ${p}`),
+    ...roofPieces.filter((p) => p !== null),
     ...walls,
     ...rooms,
     ...home.dimensionLines.map(

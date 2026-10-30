@@ -10,6 +10,7 @@ import {
   type Home,
   type HomePiece,
   type Level,
+  type Roof,
   type LibraryInfo,
   type LightInfo,
   type Room,
@@ -20,7 +21,7 @@ import {
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
-import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, TEXTURE_EXTRAS_PROPERTY, type TextureExtras } from './sh3dExport'
+import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -173,6 +174,12 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
 
   let missingModels = 0
   const readPiece = (e: Element, level: string | null) => {
+    // Von Sweet3D exportiertes Dach: wieder als Dach statt als Möbel
+    const roof = parseJson<Roof>(property(e, ROOF_PROPERTY))
+    if (roof && Array.isArray(roof.points) && roof.points.length >= 3 && Array.isArray(roof.edges)) {
+      home.roofs.push({ ...roof, id: e.getAttribute('id') ?? roof.id, level, holes: roof.holes ?? [] })
+      return
+    }
     const catalogPiece = byCatalogId.get(e.getAttribute('catalogId') ?? '')
     const libraryId = catalogPiece?.libraryId ?? property(e, LIBRARY_ID_PROPERTY)
     const model = catalogPiece?.model ?? content(e.getAttribute('model'))
@@ -240,6 +247,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
       level: levelOf(e),
       leftSide: surfaceOf(e, 'leftSideColor', 'leftSideTexture'),
       rightSide: surfaceOf(e, 'rightSideColor', 'rightSideTexture'),
+      ...(property(e, TO_ROOF_PROPERTY) === 'true' && { toRoof: true }),
     }
   })
 

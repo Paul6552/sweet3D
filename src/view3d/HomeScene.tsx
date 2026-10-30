@@ -10,7 +10,7 @@ import { dispatch } from '../store/editorStore'
 import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
 import { PieceModel } from './PieceModel'
-import { roofGeometry } from './roofGeometry'
+import { ROOF_COLORS, roofGeometry, roofSurfaces } from './roofGeometry'
 import { roomGeometry, staircaseHoles, type StaircaseShapeOf } from './staircases'
 import { toShapes, wallSlices } from './wallGeometry'
 
@@ -50,13 +50,10 @@ const SHADOW_USER_DATA = { photo: false }
 const WALL = '#f1eee8'
 const FLOOR = '#cdb79a'
 const CEILING = '#fafafa'
-const ROOF_TOP = '#9c4a33'
-const ROOF_UNDERSIDE = '#e6dccd'
-const ROOF_SIDES = '#f3efe8'
 
 /** Materialien in der Reihenfolge der Gruppen aus roofGeometry: Deckung, Untersicht, Stirnseiten. */
 function roofMaterials(roof: Roof, highlight: string | null) {
-  return [surfaceMaterial(roof.top, ROOF_TOP, highlight), surfaceMaterial(roof.underside, ROOF_UNDERSIDE, highlight), surfaceMaterial(roof.sides, ROOF_SIDES, highlight)]
+  return roofSurfaces(roof).map((surface, group) => surfaceMaterial(surface, ROOF_COLORS[group], highlight))
 }
 
 /** Materialien in der Reihenfolge der Gruppen aus wallSlices: Kanten, linke Seite, rechte Seite. */

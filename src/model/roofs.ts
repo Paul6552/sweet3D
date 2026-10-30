@@ -16,9 +16,11 @@ import {
   type RoofEdge,
   type RoofProfileStep,
   type RoofShape,
+  type Room,
   type Wall,
 } from './home'
-import { defaultEaveHeight, levelElevation } from './levels'
+import { defaultEaveHeight, levelElevation, newRoofLevel, roofLevel } from './levels'
+import type { HomeCommand } from './commands'
 import { straightSkeleton, type Plane, type Point3, type SkeletonStep } from './roofSkeleton'
 
 export const GABLE = Math.PI / 2
@@ -642,11 +644,13 @@ function edgeLengths(points: Point[]): number[] {
 
 /** Größter Abstand eines Zwischenpunkts von der Hausseite, bei dem er noch als gerade gilt (leicht versetzte Wände). */
 const STRAIGHT_TOLERANCE = 10
+/** Winkel, unter dem eine Ecke als Zacke ohne Fläche gilt. */
+const SPIKE_ANGLE = (5 * Math.PI) / 180
 
 /**
- * Ecken des Umrisses: Indizes der Punkte, die nicht fast auf der Linie zwischen ihren Nachbarecken
- * liegen. Entfernt wird immer der Punkt mit der kleinsten Abweichung, bis keiner mehr unter
- * {@code tolerance} liegt.
+ * Ecken des Umrisses: Indizes der Punkte, die nicht fast auf der Geraden durch ihre Nachbarecken
+ * liegen (auch Rücksprünge auf ihr fallen weg). Entfernt wird immer der Punkt mit der kleinsten
+ * Abweichung, bis keiner mehr unter {@code tolerance} liegt.
  */
 export function cornerIndices(points: Point[], tolerance = STRAIGHT_TOLERANCE): number[] {
   const kept = points.map((_, i) => i)
@@ -656,7 +660,12 @@ export function cornerIndices(points: Point[], tolerance = STRAIGHT_TOLERANCE): 
     kept.forEach((index, k) => {
       const a = points[kept[(k + kept.length - 1) % kept.length]]
       const b = points[kept[(k + 1) % kept.length]]
-      const d = distanceToSegment(points[index], a, b)
+      const p = points[index]
+      // Spitze Zacke (der Umriss kehrt fast auf sich selbst um): immer entfernen
+      const u: Point = [a[0] - p[0], a[1] - p[1]]
+      const v: Point = [b[0] - p[0], b[1] - p[1]]
+      const spike = Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])) < SPIKE_ANGLE
+      const d = spike ? 0 : distanceToLine(p, a, b)
       if (d < bestDistance) {
         best = k
         bestDistance = d
@@ -666,6 +675,13 @@ export function cornerIndices(points: Point[], tolerance = STRAIGHT_TOLERANCE): 
     kept.splice(best, 1)
   }
   return kept
+}
+
+/** Abstand von der Geraden durch a und b: auch Rücksprünge auf ihr (Zacken ohne Fläche) fallen weg. */
+function distanceToLine(p: Point, a: Point, b: Point): number {
+  const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+  if (length < 1e-9) return Math.hypot(p[0] - a[0], p[1] - a[1])
+  return Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / length
 }
 
 /** Umriss ohne fast gerade Zwischenpunkte. */
@@ -786,30 +802,94 @@ export function createRoof(points: Point[], level: string | null, shape: RoofSha
   return { ...roof, ...shapeEdges(roof, shape) }
 }
 
+/** Anteil des Rands, der an Wänden liegen muss, damit ein Raum als Innenraum zählt (nicht Terrasse oder Balkon). */
+const INDOOR_SHARE = 0.75
+
 /**
- * Außenumriss der Wände um den Punkt (Doppelklick mit dem Dach-Werkzeug): die Vereinigung aller
- * Wandflächen, in deren Umriss der Punkt liegt; Innenhöfe werden Löcher des Dachs.
+ * Grundrisse der Häuser eines Geschosses, über die das Dach-Werkzeug je ein Dach legt: die
+ * Innenräume (Räume, deren Rand größtenteils an Wänden liegt) samt den Wänden an ihrem Rand. Ohne
+ * Räume zählen die Flächen, die Wände ringsum einschließen. Fast gerade Zwischenpunkte fallen weg.
  */
-export function outlineFromWalls(walls: Wall[], point: Point): { points: Point[]; holes: Point[][] } | null {
-  if (walls.length === 0) return null
+export function houseOutlines(walls: Wall[], rooms: Pick<Room, 'points'>[]): Point[][] {
   const byId = new Map(walls.map((w) => [w.id, w]))
-  const polygons: Polygon[] = walls.map((w) => [closed(wallPolygon(w, byId))])
+  const nearWall = (p: Point, extra: number) => walls.some((w) => distanceToSegment(p, [w.xStart, w.yStart], [w.xEnd, w.yEnd]) <= w.thickness / 2 + extra)
+  const indoor = rooms.filter((room) => {
+    let closedLength = 0
+    let total = 0
+    room.points.forEach((a, i) => {
+      const b = room.points[(i + 1) % room.points.length]
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+      const count = Math.max(1, Math.ceil(length / 10))
+      for (let k = 0; k < count; k++) {
+        const t = (k + 0.5) / count
+        total += length / count
+        if (nearWall([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], 15)) closedLength += length / count
+      }
+    })
+    return total > 0 && closedLength / total >= INDOOR_SHARE
+  })
+  // Wände mit überwiegend Innenraum auf einer Seite (Außen- und Innenwände), nicht Brüstungen von Terrasse oder Balkon
+  const inIndoor = (p: Point) => indoor.some((room) => pointInPolygon(p, room.points))
+  const bounding = (w: Wall) => {
+    const length = Math.hypot(w.xEnd - w.xStart, w.yEnd - w.yStart) || 1
+    const normal: Point = [-(w.yEnd - w.yStart) / length, (w.xEnd - w.xStart) / length]
+    const side = (sign: number) => {
+      let inside = 0
+      for (let k = 0; k < 9; k++) {
+        const t = (k + 0.5) / 9
+        const offset = sign * (w.thickness / 2 + 5)
+        if (inIndoor([w.xStart + (w.xEnd - w.xStart) * t + normal[0] * offset, w.yStart + (w.yEnd - w.yStart) * t + normal[1] * offset])) inside++
+      }
+      return inside / 9
+    }
+    return Math.max(side(1), side(-1)) >= 0.5
+  }
+  const wallPolygons = walls.map((w): Polygon => [closed(wallPolygon(w, byId))])
   let union: MultiPolygon
   try {
-    union = clipping.union(polygons[0], ...polygons.slice(1))
+    if (indoor.length > 0) {
+      // Wände am Rand der Innenräume schließen den Umriss nach außen ab, freistehende (Brüstungen) nicht
+      const edgeWalls = wallPolygons.filter((_, i) => bounding(walls[i]))
+      const [first, ...rest] = [...indoor.map((r): Polygon => [closed(r.points)]), ...edgeWalls]
+      union = clipping.union(first, ...rest)
+    } else if (wallPolygons.length > 0) {
+      // Nur Wände: Flächen, die sie ringsum einschließen (Löcher der Vereinigung)
+      union = clipping.union(wallPolygons[0], ...wallPolygons.slice(1)).filter((polygon) => polygon.length > 1)
+    } else {
+      return []
+    }
   } catch {
-    return null
+    return []
   }
-  let best: Polygon | null = null
-  for (const polygon of union) {
-    const outer = open(polygon[0])
-    if (pointInPolygon(point, outer) && (!best || polygonArea(outer) < polygonArea(open(best[0])))) best = polygon
-  }
-  if (!best) return null
-  const outer = open(best[0])
-  // Löcher, die kein Raum sind, sondern Höfe: Wandflächen außen herum, also groß genug und ohne Wand dahinter
-  // lassen sich nicht sicher erkennen, daher bleibt das Dach geschlossen
-  return { points: outer, holes: [] }
+  return union
+    .map((polygon) => simplifyOutline(open(polygon[0])))
+    .filter((outline) => outline.length >= 3 && Math.abs(polygonArea(outline)) >= 20000)
+}
+
+/**
+ * Befehl des Dach-Symbols: wechselt auf das Dach-Niveau (legt es bei Bedarf an) und legt dort über
+ * jedem Haus des Geschosses darunter ein Dach an, sofern dort noch keins liegt. Die Wände an der
+ * Traufe und am Giebel reichen bis zum Dach.
+ */
+export function roofTool(home: Home, names: { roof: string; base: string }): { command: HomeCommand | null; levelId: string | null; roofIds: string[] } {
+  const existing = roofLevel(home)
+  const created = existing ? null : newRoofLevel(home, names.roof, names.base)
+  const level = existing ?? created!.levels.at(-1)!
+  // Geschoss darunter; ohne Ebenen gehört bisher alles zur Ebene null
+  const storeys = home.levels.filter((l) => !l.roof && l.elevation < level.elevation)
+  const storey = created?.base ? null : (storeys.at(-1)?.id ?? null)
+  const present = home.roofs.filter((r) => r.level === level.id && !r.dormer)
+  if (present.length > 0) return { command: created && { type: 'addLevels', levels: created.levels, assignExistingTo: null }, levelId: level.id, roofIds: present.map((r) => r.id) }
+
+  const walls = home.walls.filter((w) => w.level === storey)
+  const rooms = home.rooms.filter((r) => r.level === storey)
+  const roofs = houseOutlines(walls, rooms).map((outline) => ({ ...createRoof(outline, level.id), level: level.id }))
+  const under = new Set(roofs.flatMap((roof) => wallsUnderRoofEdge(walls, roof).map((w) => w.id)))
+  const commands: HomeCommand[] = []
+  if (created) commands.push({ type: 'addLevels', levels: created.levels, assignExistingTo: created.base?.id ?? null })
+  if (roofs.length > 0) commands.push({ type: 'addItems', roofs })
+  if (under.size > 0) commands.push({ type: 'updateWalls', changes: [...under].map((id) => ({ id, toRoof: true })) })
+  return { command: commands.length === 0 ? null : commands.length === 1 ? commands[0] : { type: 'batch', commands }, levelId: level.id, roofIds: roofs.map((r) => r.id) }
 }
 
 /** Wände, deren Außenseite auf der Wandlinie des Dachs liegt (Giebel- und Traufwände). */

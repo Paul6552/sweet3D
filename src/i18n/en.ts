@@ -134,6 +134,7 @@ export const en: Resources = {
     deleteConfirm: 'Delete level “{{name}}” with all its walls, rooms, roofs and furniture?',
   },
   plan: {
+    noHouse: 'No house found: the top storey needs rooms or walls that enclose an area',
     modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms', roof: 'Create roof', dormer: 'Create dormer', dimension: 'Create dimensions', label: 'Add text' },
     modify: 'Modify selection (double-click)',
     zoomIn: 'Zoom in',
@@ -148,9 +149,6 @@ export const en: Resources = {
       wallNext: 'Click sets the next corner · Double-click or Esc finishes · Alt disables magnetism',
       roomStart: 'Click to set corners · Double-click inside an enclosed area creates the room automatically',
       roomNext: 'Click sets the next point · Double-click or Enter finishes · Esc cancels',
-      roofStart: 'Double-click inside a house puts a roof over the outer walls of the level below · or click to set the eave corners',
-      roofLevel: 'Roofs are made on the “Roof” level · click the roof icon to go there',
-      roofNext: 'Click sets the next eave corner · Double-click or Enter finishes · Esc cancels',
       dormer: 'Drag a rectangle on a roof face to add a shed dormer · with Shift a gable dormer',
       dimensionStart: 'Click to set the start of the dimension · snaps to corners',
       dimensionEnd: 'Click to set the end of the dimension · Esc cancels',

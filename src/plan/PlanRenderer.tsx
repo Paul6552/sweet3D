@@ -16,7 +16,6 @@ export interface PlanPreview {
   /** Punkte des Raums, der gerade gezeichnet wird (inkl. Mauszeiger). */
   roomPoints?: Point[]
   /** Punkte des Dachs, das gerade gezeichnet wird (inkl. Mauszeiger). */
-  roofPoints?: Point[]
   /** Gaube, die gerade aufgezogen wird. */
   dormer?: Point[]
   rubberBand?: [Point, Point]
@@ -508,17 +507,6 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         />
       )}
 
-      {preview.roofPoints && preview.roofPoints.length > 1 && (
-        <Line
-          points={flat(preview.roofPoints)}
-          closed={preview.roofPoints.length > 2}
-          fill={`${roofInk}22`}
-          stroke={roofInk}
-          strokeWidth={2 / scale}
-          dash={[6 / scale, 4 / scale]}
-          listening={false}
-        />
-      )}
 
       {preview.dormer && <Line points={flat(preview.dormer)} closed fill={`${roofInk}33`} stroke={selectedColor} strokeWidth={2 / scale} dash={[6 / scale, 4 / scale]} listening={false} />}
 

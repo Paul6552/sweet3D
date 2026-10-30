@@ -132,6 +132,7 @@ export const de = {
     deleteConfirm: 'Ebene „{{name}}“ mit allen Wänden, Räumen, Dächern und Möbeln löschen?',
   },
   plan: {
+    noHouse: 'Kein Haus gefunden: Das oberste Geschoss braucht Räume oder ringsum geschlossene Wände',
     modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen', roof: 'Dach anlegen', dormer: 'Gaube anlegen', dimension: 'Maßlinien zeichnen', label: 'Texte einfügen' },
     modify: 'Auswahl ändern (Doppelklick)',
     zoomIn: 'Vergrößern',
@@ -146,9 +147,6 @@ export const de = {
       wallNext: 'Klicken setzt die nächste Ecke · Doppelklick oder Esc beendet · Alt ohne Magnetismus',
       roomStart: 'Klicken setzt Eckpunkte · Doppelklick in einen umschlossenen Bereich legt den Raum automatisch an',
       roomNext: 'Klicken setzt den nächsten Punkt · Doppelklick oder Enter beendet · Esc bricht ab',
-      roofStart: 'Doppelklick in ein Haus legt das Dach über die Außenwände des Niveaus darunter · oder Klicken setzt die Ecken der Traufe',
-      roofLevel: 'Dächer entstehen auf dem Niveau „Dach“ · Klick auf das Dach-Symbol wechselt dorthin',
-      roofNext: 'Klicken setzt die nächste Ecke der Traufe · Doppelklick oder Enter beendet · Esc bricht ab',
       dormer: 'Rechteck auf einer Dachfläche ziehen legt eine Schleppgaube an · mit Umschalt eine Satteldachgaube',
       dimensionStart: 'Klicken setzt den Anfang der Maßlinie · rastet an Ecken ein',
       dimensionEnd: 'Klicken setzt das Ende der Maßlinie · Esc bricht ab',

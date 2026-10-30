@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Point } from './geometry'
-import type { Roof } from './home'
-import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, rawRoofModel, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
+import type { Home, Roof, Wall } from './home'
+import { cleanRing, computeRoof, cornerIndices, createDormer, createRoof, edgeKind, houseOutlines, rawRoofModel, roofTool, gableEdges, linearZ, roofAreas, roofHeightAt, roofHeightsAlong, roofModels, shapeEdges, skylightHole, skylightPlacement, wallCaps, type RoofModel } from './roofs'
 import { pointInPolygon, polygonArea, wallPolygon } from './geometry'
 import { createEmptyHome } from './home'
 import { newLevels, newRoofLevel } from './levels'
@@ -321,5 +321,43 @@ describe('Neues Geschoss unter dem Dach', () => {
     // Höheres Erdgeschoss hebt das Dach mit
     applyCommand(home, { type: 'updateLevel', change: { id: home.levels[0].id, height: 300 } })
     expect(home.levels.find((l) => l.roof)?.elevation).toBe(elevation + 50)
+  })
+})
+
+describe('Dach-Symbol', () => {
+  const wall = (id: string, xStart: number, yStart: number, xEnd: number, yEnd: number, wallAtStart: string, wallAtEnd: string): Wall => ({ id, xStart, yStart, xEnd, yEnd, wallAtStart, wallAtEnd, thickness: 20, height: null, level: null })
+  // Haus 1000 × 600 (Wandachsen, an den Ecken verbunden), Terrasse 300 × 600 rechts davor ohne Wände
+  const walls = [wall('n', 0, 0, 1000, 0, 'w', 'o'), wall('o', 1000, 0, 1000, 600, 'n', 's'), wall('s', 1000, 600, 0, 600, 'o', 'w'), wall('w', 0, 600, 0, 0, 's', 'n')]
+  const house = { points: [[10, 10], [990, 10], [990, 590], [10, 590]] as Point[] }
+  const terrace = { points: [[1010, 0], [1300, 0], [1300, 600], [1010, 600]] as Point[] }
+
+  it('Umriss aus Innenräumen und ihren Wänden, ohne Terrasse', () => {
+    const [outline, ...rest] = houseOutlines(walls, [house, terrace])
+    expect(rest).toEqual([])
+    expect(Math.abs(polygonArea(outline))).toBeCloseTo(1020 * 620, -2)
+  })
+
+  it('Ohne Räume: von Wänden eingeschlossene Fläche', () => {
+    expect(houseOutlines(walls, []).map((o) => Math.round(Math.abs(polygonArea(o)) / 1e4))).toEqual([63])
+    expect(houseOutlines(walls.slice(0, 3).map((w) => ({ ...w, wallAtStart: null, wallAtEnd: null })), [])).toEqual([])
+  })
+
+  it('legt Dach-Niveau und Dach an, beim zweiten Klick nur die Auswahl', () => {
+    const home = { ...createEmptyHome(), walls: [...walls], rooms: [{ ...house, id: 'r', name: null, floorVisible: true, ceilingVisible: true, level: null }] } as Home
+    const first = roofTool(home, { roof: 'Dach', base: 'Ebene 0' })
+    applyCommand(home, first.command!)
+    expect(home.levels.map((l) => [l.name, !!l.roof])).toEqual([['Ebene 0', false], ['Dach', true]])
+    expect(home.roofs.map((r) => r.level)).toEqual([home.levels[1].id])
+    expect(home.walls.every((w) => w.toRoof && w.level === home.levels[0].id)).toBe(true)
+    const second = roofTool(home, { roof: 'Dach', base: 'Ebene 0' })
+    expect(second.command).toBeNull()
+    expect(second.roofIds).toEqual(first.roofIds)
+  })
+})
+
+describe('Umriss vereinfachen', () => {
+  it('entfernt Zacken, auch wenn ihr Fuß schräg liegt', () => {
+    const ring: Point[] = [[0, 0], [1000, 0], [1000, 600], [131, 600], [619, 600.5], [130, 599], [0, 600]]
+    expect(cornerIndices(ring)).toEqual([0, 1, 2, 6])
   })
 })

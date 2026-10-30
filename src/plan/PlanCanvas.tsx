@@ -6,10 +6,10 @@ import { useTranslation } from 'react-i18next'
 import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
 import { pieceFromCatalog } from '../model/furniture'
-import { dimensionLength, distance, distanceToSegment, pointInPolygon, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
+import { dimensionLength, distance, distanceToSegment, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
-import { createDormer, createRoof, outlineFromWalls, rawRoofModel, roofContour, roofHeightAt, simplifyOutline, skylightPlacement, wallsUnderRoofEdge } from '../model/roofs'
+import { createDormer, rawRoofModel, roofContour, roofHeightAt, skylightPlacement } from '../model/roofs'
 import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
@@ -267,12 +267,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   )
   const belowId = levelBelow(fullHome)?.id
   const wallsBelow = useMemo(() => (belowId ? fullHome.walls.filter((w) => w.level === belowId) : undefined), [fullHome.walls, belowId])
-  // Dächer entstehen nur auf dem Dach-Niveau, über den Wänden und Räumen des Niveaus darunter
-  const onRoofLevel = !!fullHome.levels.find((l) => l.id === fullHome.selectedLevel)?.roof
-  const homeBelow = useMemo(
-    () => ({ ...fullHome, walls: wallsBelow ?? [], rooms: belowId ? fullHome.rooms.filter((r) => r.level === belowId) : [] }),
-    [fullHome, wallsBelow, belowId],
-  )
   // Dächer tieferer Ebenen, die in diese reichen: blass, mit der Linie 1 m über dem Boden (Kniestock)
   const roofsBelow = useMemo(() => {
     const level = fullHome.levels.find((l) => l.id === fullHome.selectedLevel)
@@ -294,7 +288,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
   const [pointer, setPointer] = useState<{ point: Point; alt: boolean } | null>(null)
   const [chain, setChain] = useState<WallChain | null>(null)
   const [roomPoints, setRoomPoints] = useState<Point[]>([])
-  const [roofPoints, setRoofPoints] = useState<Point[]>([])
   const [roofMenu, setRoofMenu] = useState<RoofMenuTarget | null>(null)
   const [dimension, setDimension] = useState<DimensionDraft | null>(null)
   const [cursorStyle, setCursorStyle] = useState('default')
@@ -340,7 +333,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         if (state.mode !== previous.mode) {
           setChain(null)
           setRoomPoints([])
-          setRoofPoints([])
           setDimension(null)
         }
       }),
@@ -383,26 +375,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     [],
   )
 
-  /** Legt ein Dach über den Umriss an; {@code walls}: Wände darunter, deren Oberkante dem Dach folgt. */
-  const addRoof = useCallback((outline: Point[], walls: Wall[] = []) => {
-    const level = useEditorStore.getState().home!.selectedLevel
-    const roof = createRoof(simplifyOutline(outline), level)
-    const under = wallsUnderRoofEdge(walls, roof)
-    const add: HomeCommand = { type: 'addItems', roofs: [roof] }
-    executeCommand(under.length > 0 ? { type: 'batch', commands: [add, { type: 'updateWalls', changes: under.map((w) => ({ id: w.id, toRoof: true })) }] } : add)
-    dispatch({ type: 'select', ids: [roof.id] })
-  }, [])
-
-  const finishRoof = useCallback(
-    (points: Point[]) => {
-      const unique = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5)
-      if (unique.length > 2 && distance(unique[0], unique.at(-1)!) < 0.5) unique.pop()
-      if (unique.length >= 3) addRoof(unique, homeBelow.walls)
-      setRoofPoints([])
-    },
-    [addRoof, homeBelow],
-  )
-
   // Tastatur: Esc bricht ab, Enter beendet einen Raum, Leertaste zum Verschieben der Ansicht
   useEffect(() => {
     const isInput = (event: KeyboardEvent) => (event.target as HTMLElement | null)?.closest('input, textarea') != null
@@ -425,12 +397,9 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         setGesture(null)
         setChain(null)
         setRoomPoints([])
-        setRoofPoints([])
         setDimension(null)
       } else if (event.key === 'Enter' && roomPoints.length > 0) {
         finishRoom(roomPoints)
-      } else if (event.key === 'Enter' && roofPoints.length > 0) {
-        finishRoof(roofPoints)
       }
     }
     const onKeyUp = (event: KeyboardEvent) => {
@@ -442,7 +411,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [roomPoints, finishRoom, roofPoints, finishRoof])
+  }, [roomPoints, finishRoom])
 
   const onPointerDown = (event: React.PointerEvent) => {
     containerRef.current!.focus()
@@ -499,10 +468,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     } else if (mode === 'room') {
       const snapped = magnet ? snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : point
       setRoomPoints((points) => [...points, roundPoint(snapped)])
-    } else if (mode === 'roof') {
-      if (!onRoofLevel) return
-      const snapped = magnet ? snapToPoints(point, [...roomSnapPoints(homeBelow), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : point
-      setRoofPoints((points) => [...points, roundPoint(snapped)])
     } else if (mode === 'dormer') {
       // Oberstes Dach (keine Gaube) unter dem Punkt
       const roof = home.roofs
@@ -603,29 +568,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       else if (hitCompass(home, point, scale, HANDLE_TOLERANCE_PX / scale)) openCompassDialog()
     } else if (mode === 'wall') {
       setChain(null)
-    } else if (mode === 'roof') {
-      if (!onRoofLevel) return
-      const points = roofPoints.filter((p, i) => i === 0 || distance(p, roofPoints[i - 1]) > 0.5)
-      setRoofPoints([])
-      if (points.length >= 3) {
-        finishRoof(roofPoints)
-        return
-      }
-      const point = toPlan(event.clientX, event.clientY)
-      // Doppelklick auf ein vorhandenes Dach: auswählen statt ein zweites darüberzulegen
-      const existing = home.roofs.find((r) => !r.dormer && pointInPolygon(point, r.points))
-      if (existing) {
-        dispatch({ type: 'select', ids: [existing.id] })
-        return
-      }
-      // Doppelklick in ein Haus: Dach über den Außenumriss der Wände darunter, sonst über den Raum
-      const outline = outlineFromWalls(homeBelow.walls, point)
-      if (outline) {
-        addRoof(outline.points, homeBelow.walls)
-        return
-      }
-      const room = [...homeBelow.rooms].reverse().find((r) => pointInPolygon(point, r.points))
-      if (room) addRoof(room.points, homeBelow.walls)
     } else if (mode === 'room') {
       const points = roomPoints.filter((p, i) => i === 0 || distance(p, roomPoints[i - 1]) > 0.5)
       if (points.length >= 3) {
@@ -686,10 +628,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const next = magnetNow ? snapToPoints(pointer.point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : pointer.point
     preview.roomPoints = [...roomPoints, next]
   }
-  if (mode === 'roof' && roofPoints.length > 0 && pointer) {
-    const next = magnetNow ? snapToPoints(pointer.point, [...roomSnapPoints(homeBelow), ...home.roofs.flatMap((r) => r.points)], SNAP_TOLERANCE_PX / scale) : pointer.point
-    preview.roofPoints = [...roofPoints, next]
-  }
   if (mode === 'dimension' && dimension && pointer) {
     const end = dimension.end ?? dimensionPoint(home, dimension.start, pointer.point, magnetNow, scale)
     const line: DimensionLine = {
@@ -717,8 +655,6 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       ? t(chain ? 'plan.hints.wallNext' : 'plan.hints.wallStart')
       : mode === 'room'
         ? t(roomPoints.length > 0 ? 'plan.hints.roomNext' : 'plan.hints.roomStart')
-        : mode === 'roof'
-          ? t(!onRoofLevel ? 'plan.hints.roofLevel' : roofPoints.length > 0 ? 'plan.hints.roofNext' : 'plan.hints.roofStart')
         : mode === 'dormer'
           ? t('plan.hints.dormer')
         : mode === 'dimension'

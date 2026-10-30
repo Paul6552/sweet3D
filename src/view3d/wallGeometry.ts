@@ -2,6 +2,7 @@ import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'pol
 import { ExtrudeGeometry, Path, Shape, type BufferGeometry } from 'three'
 import type { HomePiece, Wall } from '../model/home'
 import { pieceCorners, wallPolygon, type Point } from '../model/geometry'
+import { halfPlane, linearZ, type LinearHeight, type WallCap } from '../model/roofs'
 
 /** Materialgruppen einer Wandscheibe: Stirnseiten, Laibungen und Kanten bleiben in der Standardfarbe. */
 export const WALL_DEFAULT = 0
@@ -41,32 +42,77 @@ export function toShapes(multiPolygon: MultiPolygon): Shape[] {
  * abgezogen und die Fläche senkrecht extrudiert (wie Wall3D in Sweet Home 3D).
  * {@code floorThickness}: so weit reicht die Wand unter den Boden der Ebene, damit zwischen den Wänden
  * übereinanderliegender Ebenen keine Fuge in der Dicke der Decke bleibt.
+ * {@code caps}: Teile des Grundrisses mit eigener, linearer Oberkante (Wand bis zum Dach, siehe
+ * wallCaps); in einer Scheibe, durch die eine schräge Oberkante läuft, wird der Teil darunter extrudiert
+ * und seine Deckfläche auf die Oberkante gelegt.
  */
-export function wallSlices(wall: Wall, wallHeight: number, doorsAndWindows: HomePiece[], wallsById: Map<string, Wall>, floorThickness = 0): WallSlice[] {
+export function wallSlices(
+  wall: Wall,
+  wallHeight: number,
+  doorsAndWindows: HomePiece[],
+  wallsById: Map<string, Wall>,
+  floorThickness = 0,
+  caps?: WallCap[],
+): WallSlice[] {
   const height = wall.height ?? wallHeight
-  const outline: Polygon = [ring(wallPolygon(wall, wallsById))]
+  const polygon = wallPolygon(wall, wallsById)
+  const outline: Polygon = [ring(polygon)]
+  const parts = caps ?? [{ area: [outline], height: [0, 0, height] as LinearHeight }]
   const openings = doorsAndWindows
     .filter((p) => p.visible)
     .map((piece) => ({ piece, area: cutOut(piece, wall.thickness) }))
     .filter(({ area }) => polygonClipping.intersection(outline, [area]).length > 0)
 
-  const levels = new Set([-floorThickness, 0, height])
+  // Höchster Punkt der Oberkante: bei linearer Höhe an einer Ecke der Teilfläche
+  const tops = parts.map(({ area, height: h }) => Math.max(...area.flatMap((poly) => poly[0].map((p) => linearZ(h, p as Point)))))
+  const top = Math.max(...tops)
+  if (!(top > -floorThickness)) return []
+  const levels = new Set([-floorThickness, 0, top])
+  for (const { height: h } of parts) if (h[0] === 0 && h[1] === 0) levels.add(h[2])
   for (const { piece } of openings) {
-    for (const z of [piece.elevation, piece.elevation + piece.height]) {
-      if (z > 0 && z < height) levels.add(z)
-    }
+    for (const z of [piece.elevation, piece.elevation + piece.height]) levels.add(z)
   }
-  const sorted = [...levels].sort((a, b) => a - b)
+  const sorted = [...levels].filter((z) => z >= -floorThickness && z <= top).sort((a, b) => a - b)
 
   const slices: WallSlice[] = []
+  const add = (area: MultiPolygon, bottom: number, sliceTop: number, cap: LinearHeight | null) => {
+    if (area.length === 0) return
+    const geometry = new ExtrudeGeometry(toShapes(area), { depth: sliceTop - bottom, bevelEnabled: false })
+    if (cap) {
+      // Deckfläche (z = 0, Szenenhöhe sliceTop) auf die schräge Oberkante legen
+      const position = geometry.getAttribute('position')
+      for (let i = 0; i < position.count; i++) {
+        if (Math.abs(position.getZ(i)) > 1e-6) continue
+        const z = linearZ(cap, [position.getX(i), position.getY(i)])
+        position.setZ(i, Math.min(sliceTop - bottom, Math.max(0, sliceTop - z)))
+      }
+      geometry.computeVertexNormals()
+    }
+    slices.push({ geometry: assignSides(geometry, wall, sliceTop), bottom, top: sliceTop })
+  }
   for (let i = 0; i < sorted.length - 1; i++) {
     const bottom = sorted[i]
-    const top = sorted[i + 1]
-    const active = openings.filter(({ piece }) => piece.elevation <= bottom && piece.elevation + piece.height >= top)
-    const area = active.length > 0 ? polygonClipping.difference(outline, ...active.map(({ area }) => [area] as Polygon)) : [outline]
-    if (area.length === 0) continue
-    const geometry = new ExtrudeGeometry(toShapes(area), { depth: top - bottom, bevelEnabled: false })
-    slices.push({ geometry: assignSides(geometry, wall, top), bottom, top })
+    const sliceTop = sorted[i + 1]
+    if (sliceTop - bottom < 1e-6) continue
+    const active = openings.filter(({ piece }) => piece.elevation <= bottom && piece.elevation + piece.height >= sliceTop)
+    const cut = (area: MultiPolygon) => (active.length > 0 && area.length > 0 ? polygonClipping.difference(area, ...active.map(({ area }) => [area] as Polygon)) : area)
+    const full: MultiPolygon[] = []
+    for (const { area, height: [gx, gy, g0] } of parts) {
+      if (gx === 0 && gy === 0) {
+        // Waagrechte Oberkante: Ihre Höhe ist eine Scheibengrenze
+        if (g0 >= sliceTop) full.push(area)
+        continue
+      }
+      // Ganz hoch, wo die Oberkante über der Scheibe liegt; schräg abgeschnitten, wo sie durch die Scheibe läuft
+      const above = halfPlane(-gx, -gy, g0 - sliceTop, polygon)
+      const over = halfPlane(-gx, -gy, g0 - bottom, polygon)
+      if (!over) continue
+      const whole = above ? polygonClipping.intersection(area, above) : []
+      if (whole.length > 0) full.push(whole)
+      const sloped = above ? polygonClipping.difference(polygonClipping.intersection(area, over), above) : polygonClipping.intersection(area, over)
+      if (sloped.length > 0) add(cut(sloped), bottom, sliceTop, [gx, gy, g0])
+    }
+    if (full.length > 0) add(cut(full.length === 1 ? full[0] : polygonClipping.union(full[0], ...full.slice(1))), bottom, sliceTop, null)
   }
   return slices
 }
@@ -85,8 +131,12 @@ function assignSides(geometry: BufferGeometry, wall: Wall, top: number): BufferG
   const dy = (wall.yEnd - wall.yStart) / length
   const groups: number[][] = [[], [], []]
   for (let i = 0; i < position.count; i += 3) {
-    const zs = [position.getZ(i), position.getZ(i + 1), position.getZ(i + 2)]
-    if (zs[0] === zs[1] && zs[1] === zs[2]) {
+    // Ober- und Unterseite (auch schräg unter dem Dach) stehen nicht senkrecht
+    const ex = position.getX(i + 1) - position.getX(i)
+    const ey = position.getY(i + 1) - position.getY(i)
+    const fx = position.getX(i + 2) - position.getX(i)
+    const fy = position.getY(i + 2) - position.getY(i)
+    if (Math.abs(ex * fy - ey * fx) > 1e-6) {
       // Ober- bzw. Unterseite
       groups[WALL_DEFAULT].push(i, i + 1, i + 2)
       continue

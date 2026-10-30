@@ -4,8 +4,9 @@ import polygonClipping, { type Polygon } from 'polygon-clipping'
 import { DoubleSide, Layers, MeshBasicMaterial, Shape, ShapeGeometry, type BufferGeometry } from 'three'
 import { useCatalogStore } from '../catalog/catalogStore'
 import type { Home, HomePiece, Roof, Wall } from '../model/home'
+import { wallPolygon } from '../model/geometry'
 import { defaultWallHeight, findLevel, levelElevation, levelsAbove, visibleLevels } from '../model/levels'
-import { rawRoofModel, roofHeightAt, roofModels, type RoofModel } from '../model/roofs'
+import { rawRoofModel, roofHeightAt, roofModels, wallCaps, type RoofModel } from '../model/roofs'
 import { dispatch } from '../store/editorStore'
 import { roofRectangles } from './indoorLight'
 import { surfaceMaterial } from './materials'
@@ -182,8 +183,13 @@ function LevelScene({
   const wallsById = useMemo(() => new Map(levelWalls.map((w) => [w.id, w])), [levelWalls])
   const doorsAndWindows = useMemo(() => levelFurniture.filter((p) => p.doorOrWindow), [levelFurniture])
   const walls = useMemo(
-    () => levelWalls.map((wall) => ({ wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById, floorThickness) })),
-    [levelWalls, height, doorsAndWindows, wallsById, floorThickness],
+    () =>
+      levelWalls.map((wall) => {
+        const caps = wall.toRoof ? wallCaps(home, roofs, levelId, wallPolygon(wall, wallsById), wall.height ?? height) : undefined
+        return { wall, slices: wallSlices(wall, height, doorsAndWindows, wallsById, floorThickness, caps) }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- von home zählen nur Ebenen und Dächer (in roofs)
+    [levelWalls, height, doorsAndWindows, wallsById, floorThickness, roofs, home.levels, levelId],
   )
   // Öffnungen der Treppen: im Boden von Treppen, die von unten durch die Decke darunter kommen,
   // in der Decke von Treppen, die höher als die Decke reichen

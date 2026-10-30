@@ -247,7 +247,7 @@ function toRings(multi: MultiPolygon): Point[][][] {
 }
 
 /** Halbebene a·x + b·y < c als großes Polygon um {@code bounds}. */
-function halfPlane(a: number, b: number, c: number, bounds: Point[]): Polygon | null {
+export function halfPlane(a: number, b: number, c: number, bounds: Point[]): Polygon | null {
   const length = Math.hypot(a, b)
   if (length < 1e-12) return c > 0 ? [closed(bounds)] : null
   const n: Point = [a / length, b / length]
@@ -783,5 +783,47 @@ export function roofContext(home: Home, roof: Roof): RoofContext {
 
 /** Absolute Höhe des Bodens der Ebene eines Dachs. */
 export const roofElevation = (home: Home, roof: Roof) => levelElevation(home, roof.level)
+
+/** Lineare Höhe z = gx·x + gy·y + g0. */
+export type LinearHeight = [number, number, number]
+
+/** Teil des Grundrisses einer Wand mit der Höhe ihrer Oberkante (über dem Boden der Ebene der Wand). */
+export interface WallCap {
+  area: MultiPolygon
+  height: LinearHeight
+}
+
+export const linearZ = ([gx, gy, g0]: LinearHeight, [x, y]: Point) => gx * x + gy * y + g0
+
+/**
+ * Oberkante einer Wand, die bis zum Dach reicht: Der Grundriss {@code outline} wird nach den
+ * Dachflächen darüber aufgeteilt, dort folgt die Wand der Unterseite (auch von Dächern anderer
+ * Ebenen, über die absolute Höhe). Liegen Flächen übereinander, gilt die des niedrigeren Dachs. Wo
+ * kein Dach ist, bleibt die Wand {@code height} hoch.
+ */
+export function wallCaps(home: Pick<Home, 'levels' | 'roofs'>, models: Map<string, RoofModel>, level: string | null, outline: Point[], height: number): WallCap[] {
+  const base = levelElevation(home as Home, level)
+  const wall: Polygon = [closed(outline)]
+  const caps: WallCap[] = []
+  let assigned: MultiPolygon = []
+  const roofs = home.roofs
+    .map((roof) => ({ model: models.get(roof.id), shift: levelElevation(home as Home, roof.level) - base }))
+    .filter((r): r is { model: RoofModel; shift: number } => !!r.model && r.model.ridge + r.shift > 0)
+    .sort((a, b) => a.model.eave + a.shift - (b.model.eave + b.shift))
+  for (const { model, shift } of roofs) {
+    for (const surface of model.surfaces) {
+      const { a, b, c, d } = surface.plane
+      let area = polygonClipping.intersection(wall, surface.rings.map(closed) as Polygon)
+      if (area.length === 0) continue
+      if (assigned.length > 0) area = polygonClipping.difference(area, assigned)
+      if (area.length === 0) continue
+      assigned = polygonClipping.union(assigned, area)
+      caps.push({ area, height: [-a / c, -b / c, d / c - surface.offset + shift] })
+    }
+  }
+  const rest = assigned.length > 0 ? polygonClipping.difference(wall, assigned) : [wall]
+  if (rest.length > 0) caps.push({ area: rest, height: [0, 0, height] })
+  return caps
+}
 
 export { DEFAULT_ROOF_OVERHANG, DEFAULT_ROOF_THICKNESS }

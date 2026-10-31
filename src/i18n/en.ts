@@ -287,5 +287,7 @@ export const en: Resources = {
     stop: 'Stop',
     download: 'Save as PNG',
     close: 'Close',
+    brightRooms:
+      '“Rooms always bright (for furnishing)” is turned on: rooms are lit from above as if they had no ceiling. For realistic light through windows and doors only, turn it off in the sun position settings of the 3D view.',
   },
 }

@@ -1,3 +1,4 @@
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
@@ -12,14 +13,19 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ACESFilmicToneMapping,
+  BufferAttribute,
+  BufferGeometry,
   type Camera,
   CircleGeometry,
+  Color,
   CubeCamera,
   DirectionalLight,
+  DoubleSide,
   type Material,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
+  MeshStandardMaterial,
   PerspectiveCamera,
   PointLight,
   type Scene,
@@ -35,6 +41,7 @@ import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
 import { compileOnce, slimPathTracerShader } from './pathTracerShader'
 import { createSky, GROUND_BOUNCE } from './sky'
 import { currentExposure } from './eyeAdaptation'
+import { useBrightRoomsStore } from './brightRooms'
 
 /** Szene und Kamera der 3D-Ansicht zum Zeitpunkt des Fotos. */
 export interface SceneHandle {
@@ -58,6 +65,10 @@ const TILE_BUDGET_MS = 50
 const FRAME_BUDGET_MS = 30
 /** Start- und Mindestgröße einer Kachel in Pixeln, klein genug auch für schwache integrierte Grafik. */
 const START_TILE_PIXELS = 64 * 64
+/** Anteil der Modellfarbe an der Tönung von Glas; der Rest ist farblos. */
+const GLASS_TINT = 0.15
+/** Farbe der unsichtbaren Decken und Ebenen darüber, die Licht im Raum zurückwerfen. */
+const CEILING = '#fafafa'
 
 /** Kachelraster für die gewünschte Pixelzahl je Kachel, ungefähr quadratische Kacheln. */
 function tileGrid(width: number, height: number, tilePixels: number): [number, number] {
@@ -66,8 +77,51 @@ function tileGrid(width: number, height: number, tilePixels: number): [number, n
 }
 
 /**
+ * Teilt ein Mesh mit mehreren Materialien in eine Geometrie je Gruppe. three-gpu-pathtracer zählt
+ * beim Zusammenführen jedes Mesh als eine Gruppe, die Materialliste enthält aber alle Materialien
+ * eines Meshes: Nach dem ersten Mesh mit mehreren Materialien sind alle folgenden Zuordnungen
+ * verschoben (falsche Farben).
+ */
+function groupParts(geometry: BufferGeometry, materials: Material[], cache: Map<BufferGeometry, BufferGeometry[]>): [BufferGeometry, Material][] {
+  const groups = geometry.groups.length > 0 ? geometry.groups : [{ start: 0, count: Infinity, materialIndex: 0 }]
+  let parts = cache.get(geometry)
+  if (!parts) {
+    const index = geometry.index
+    const total = index ? index.count : geometry.getAttribute('position').count
+    parts = groups.map(({ start, count }) => {
+      // Nur die Ecken der Gruppe übernehmen, sonst verdoppelt der Pathtracer alle Attribute je Teil
+      const end = Math.min(total, start + count)
+      const indices = new Uint32Array(Math.max(0, end - start))
+      const used = new Map<number, number>()
+      for (let i = 0; i < indices.length; i++) {
+        const vertex = index ? index.getX(start + i) : start + i
+        let mapped = used.get(vertex)
+        if (mapped === undefined) used.set(vertex, (mapped = used.size))
+        indices[i] = mapped
+      }
+      const part = new BufferGeometry()
+      for (const [name, attribute] of Object.entries(geometry.attributes)) {
+        // Gleicher Datentyp, damit normalisierte Attribute (z. B. Farben) ihre Bedeutung behalten
+        const values = new (attribute.array.constructor as Float32ArrayConstructor)(used.size * attribute.itemSize)
+        used.forEach((to, from) => {
+          for (let c = 0; c < attribute.itemSize; c++) values[to * attribute.itemSize + c] = attribute.getComponent(from, c)
+        })
+        part.setAttribute(name, new BufferAttribute(values, attribute.itemSize, attribute.normalized))
+      }
+      part.setIndex(new BufferAttribute(indices, 1))
+      return part
+    })
+    cache.set(geometry, parts)
+  }
+  return groups.flatMap(({ materialIndex }, i): [BufferGeometry, Material][] => {
+    const material = materials[materialIndex ?? 0]
+    return material && parts[i].index!.count > 0 ? [[parts[i], material]] : []
+  })
+}
+
+/**
  * Kopie der sichtbaren Szene für den Pathtracer: Meshes mit ihrer Lage in der Welt (Geometrien
- * und Materialien geteilt, Glas mit echter Lichtbrechung), Sonne und Leuchten. Den Himmel liefert
+ * und Materialien geteilt, Glas als dünne, lichtdurchlässige Scheibe), Sonne und Leuchten. Den Himmel liefert
  * eine Würfelumgebung, die der Pathtracer selbst abtastet.
  */
 function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene; dispose: () => void } {
@@ -78,23 +132,39 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
     let result = glass.get(m)
     if (!result) {
       const physical = (m as MeshPhysicalMaterial).clone()
-      Object.assign(physical, { transmission: 1, opacity: 1, transparent: false, roughness: 0, thickness: 1 })
+      // Der Pathtracer färbt durchgelassenes Licht mit der Materialfarbe; Glas aus Modellen ist meist
+      // dunkel und wirkt im Raster nur durch die Deckkraft durchsichtig. Dicke 0: dünne Scheibe ohne Versatz
+      physical.color = new Color('#ffffff').lerp(physical.color, GLASS_TINT)
+      Object.assign(physical, { transmission: 1, opacity: 1, transparent: false, roughness: 0, metalness: 0, thickness: 0 })
       result = physical
       glass.set(m, result)
     }
     return result
   }
+  // Teilgeometrien von Meshes mit mehreren Materialien, je Geometrie einmal
+  const split = new Map<BufferGeometry, BufferGeometry[]>()
+  const hidden = new MeshStandardMaterial({ color: CEILING, roughness: 0.9, side: DoubleSide })
+  // Für die Kamera unsichtbar, hält aber Licht ab (siehe hideMatteFromCamera)
+  Object.assign(hidden, { matte: true })
   source.updateMatrixWorld(true)
   // Sonnenstand wie in der 3D-Ansicht: Richtung von der Sonne zum Ziel
   const sunDirection = new Vector3(0, 1, 0)
   source.traverseVisible((object) => {
     if (object.userData.photo === false) return
     if (object instanceof Mesh) {
-      const material = Array.isArray(object.material) ? object.material.map(toPhoto) : toPhoto(object.material as Material)
-      const copy = new Mesh(object.geometry, material)
-      copy.matrixAutoUpdate = false
-      copy.matrix.copy(object.matrixWorld)
-      scene.add(copy)
+      // Teile, die in der 3D-Ansicht nur Schatten werfen: Decken in der Luftansicht und Ebenen darüber
+      const parts: [BufferGeometry, Material][] =
+        object.userData.photo === 'hidden'
+          ? [[object.geometry, hidden]]
+          : Array.isArray(object.material)
+            ? groupParts(object.geometry, object.material, split)
+            : [[object.geometry, object.material as Material]]
+      for (const [geometry, material] of parts) {
+        const copy = new Mesh(geometry, toPhoto(material))
+        copy.matrixAutoUpdate = false
+        copy.matrix.copy(object.matrixWorld)
+        scene.add(copy)
+      }
     } else if (object instanceof DirectionalLight) {
       const light = new DirectionalLight(object.color, object.intensity)
       light.position.setFromMatrixPosition(object.matrixWorld)
@@ -129,6 +199,8 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
       ground.geometry.dispose()
       ground.material.dispose()
       glass.forEach((m) => m.dispose())
+      hidden.dispose()
+      split.forEach((parts) => parts.forEach((g) => g.dispose()))
     },
   }
 }
@@ -144,6 +216,8 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
   const [maxSamples, setMaxSamples] = useState(256)
   const [samples, setSamples] = useState(0)
   const [state, setState] = useState<'idle' | 'preparing' | 'rendering' | 'done' | 'error'>('idle')
+  // Wirkt über die Szene der 3D-Ansicht (siehe HomeScene); hier nur der Hinweis darauf
+  const brightRooms = useBrightRoomsStore((s) => s.brightRooms)
   const container = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement | null>(null)
   const stop = useRef<(() => void) | null>(null)
@@ -311,6 +385,11 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
             ))}
           </TextField>
         </Box>
+        {brightRooms && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {t('photo.brightRooms')}
+          </Alert>
+        )}
         {state === 'idle' && (
           <Typography color="text.secondary" sx={{ p: 4, textAlign: 'center', bgcolor: 'action.hover', borderRadius: 1 }}>
             {t('photo.hint')}

@@ -285,6 +285,8 @@ export const de = {
     stop: 'Anhalten',
     download: 'Als PNG speichern',
     close: 'Schließen',
+    brightRooms:
+      '„Räume immer hell (zum Einrichten)“ ist eingeschaltet: Die Räume werden von oben ausgeleuchtet, als hätten sie keine Decke. Für echtes Licht nur durch Fenster und Türen die Option beim Sonnenstand der 3D-Ansicht ausschalten.',
   },
 }
 

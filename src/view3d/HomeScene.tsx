@@ -45,8 +45,8 @@ const SHADOW_ONLY = new Layers()
 SHADOW_ONLY.set(SHADOW_LAYER)
 /** Wird nie gezeichnet, nur in die Schattenkarte; beidseitig, damit auch Böden und Decken Schatten werfen. */
 const SHADOW_MATERIAL = new MeshBasicMaterial({ side: DoubleSide })
-/** Nicht im Foto-Modus: dort würde der Pathtracer sie sichtbar zeichnen. */
-const SHADOW_USER_DATA = { photo: false }
+/** Im Foto-Modus für die Kamera unsichtbar, hält aber Sonne und Himmel ab (siehe PhotoDialog). */
+const SHADOW_USER_DATA = { photo: 'hidden' }
 
 const WALL = '#f1eee8'
 const FLOOR = '#cdb79a'

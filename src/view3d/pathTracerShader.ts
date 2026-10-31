@@ -54,6 +54,8 @@ const DIRECT_LIGHT = /* glsl */ `vec3 directLightContribution( vec3 worldWo, Sur
 		sampleRay.origin = rayOrigin;
 		sampleRay.direction = direction;
 		vec3 attenuatedColor;
+		// Unsichtbare Decken halten Sonne und Leuchten ganz ab, Himmelslicht nur teilweise
+		hiddenBlocksLight = isDeltaLight;
 		if (
 			hasSample &&
 			pdf > 0.0 &&
@@ -128,7 +130,8 @@ function usedFeatures(scene: Object3D) {
 
 /**
  * Passt den Pathtracing-Shader an die Szene an. Spot- und Flächenlichter kommen im Foto nie vor
- * (siehe photoScene), die übrigen Teile fallen nur weg, wenn kein Material sie braucht. Muss vor
+ * (siehe photoScene), die übrigen Teile fallen nur weg, wenn kein Material sie braucht. Matte
+ * Flächen sind für die Kamera unsichtbar (siehe hideMatteFromCamera). Muss vor
  * dem ersten Kompilieren aufgerufen werden.
  */
 export function slimPathTracerShader(material: ShaderMaterial, scene: Object3D) {
@@ -151,8 +154,68 @@ export function slimPathTracerShader(material: ShaderMaterial, scene: Object3D) 
       ),
     )
   }
+  source = hideMatteFromCamera(source)
   // Ohne needsUpdate: Das würde beim Pathtracer sofort eine Kompilierung starten
   material.fragmentShader = source
+}
+
+/** Höchstzahl unsichtbarer Flächen, durch die ein Strahl hindurchgeht (begrenzt die Schleife). */
+const MAX_HIDDEN_SKIPS = 16
+/**
+ * Anteil des Himmelslichts, der durch unsichtbare Decken und Ebenen fällt. Wie in der 3D-Ansicht
+ * (Himmelslicht in Räumen, siehe indoorLight.ts) erhellt so nicht nur das Fensterlicht die Räume;
+ * Sonne und Leuchten halten die Flächen ganz ab.
+ */
+const HIDDEN_SKY_LIGHT = 0.7
+
+/**
+ * Matte Materialien (Decken und Ebenen, die die 3D-Ansicht nicht zeigt, siehe photoScene) sind für
+ * die Kamera unsichtbar: Der Kamerastrahl geht hindurch, auch hinter Glas. Andere Strahlen treffen
+ * sie wie jede Fläche, nur Himmelslicht kommt anteilig hindurch. Im Original erscheinen matte Flächen
+ * als durchsichtiges Schwarz. Setzt DIRECT_LIGHT voraus (hiddenBlocksLight).
+ */
+function hideMatteFromCamera(source: string): string {
+  const matte = /if \( material\.matte && state\.firstRay \) \{\s*gl_FragColor = vec4\( 0\.0 \);\s*break;\s*\}/
+  const shadow = /if \( ! material\.castShadow && isShadowRay \) \{\s*continue;\s*\}/
+  const loop = 'for ( int i = 0; i < bounces; i ++ ) {'
+  const attenuate = 'bool attenuateHit('
+  if (
+    !matte.test(source) ||
+    !shadow.test(source) ||
+    source.split(loop).length !== 2 ||
+    source.split(attenuate).length !== 2 ||
+    !source.includes('hiddenBlocksLight = isDeltaLight')
+  ) {
+    console.warn('Pathtracer-Shader: Matte-Behandlung nicht wie erwartet gefunden, bleibt unverändert')
+    return source
+  }
+  const through = HIDDEN_SKY_LIGHT.toFixed(2)
+  return source
+    .replace(attenuate, `bool hiddenBlocksLight = false;\n\n\t${attenuate}`)
+    .replace(loop, `int hiddenSkips = 0;\n${loop}`)
+    .replace(
+      matte,
+      `if ( material.matte && hiddenSkips < ${MAX_HIDDEN_SKIPS} && ( state.firstRay || state.transmissiveRay || rand( 17 ) < ${through} ) ) {
+
+							// skip the surface without using up a bounce or its random numbers
+							hiddenSkips ++;
+							sobolBounceIndex --;
+							ray.origin = stepRayOrigin( ray.origin, ray.direction, - surfaceHit.faceNormal, surfaceHit.dist );
+							i --;
+							continue;
+
+						}`,
+    )
+    .replace(
+      shadow,
+      (code) => `${code}
+
+				if ( material.matte && ! hiddenBlocksLight && rand( 18 ) < ${through} ) {
+
+					continue;
+
+				}`,
+    )
 }
 
 /**

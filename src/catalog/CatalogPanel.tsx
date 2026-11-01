@@ -26,9 +26,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CatalogPiece } from '../api/catalog'
 import { PanelToolbar } from '../editor/PanelFrame'
-import { pieceFromCatalog } from '../model/furniture'
+import { homeOnLevel } from '../model/levels'
+import { catalogPieceAt } from '../plan/placement'
+import { usePlanStore, visiblePlanCenter } from '../plan/planStore'
 import { useResolvedRef } from '../storage/contents'
-import { executeCommand, useEditorStore } from '../store/editorStore'
+import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { CATALOG_PIECE_MIME, useCatalogStore } from './catalogStore'
 import { LibrariesDialog } from './LibrariesDialog'
 
@@ -120,10 +122,17 @@ export function CatalogPanel() {
     }
   }
 
-  // Doppelklick fügt das Möbel versetzt ein; Ziehen in den Plan legt es an der Mausposition ab
+  // Doppelklick fügt das Möbel (versetzt) in der Mitte des sichtbaren Plans ein, ohne Plan in diesem
+  // Fenster an der alten festen Stelle; Ziehen in den Plan legt es an der Mausposition ab
   const addToHome = (piece: CatalogPiece) => {
+    const home = useEditorStore.getState().home
+    if (!home) return
     const offset = (pieceCount % 10) * 30
-    executeCommand({ type: 'addItems', furniture: [pieceFromCatalog(piece, 100 + offset, 100 + offset)] })
+    const [cx, cy] = visiblePlanCenter() ?? [100, 100]
+    const point: [number, number] = [Math.round(cx + offset), Math.round(cy + offset)]
+    const placed = catalogPieceAt(homeOnLevel(home), piece, point, usePlanStore.getState().magnetism)
+    executeCommand({ type: 'addItems', furniture: [placed] })
+    dispatch({ type: 'select', ids: [placed.id] })
   }
   const dragProps = (piece: CatalogPiece) => ({
     draggable: true,

@@ -5,11 +5,11 @@ import { Layer, Stage } from 'react-konva'
 import { useTranslation } from 'react-i18next'
 import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
-import { pieceFromCatalog } from '../model/furniture'
 import { dimensionLength, distance, distanceToSegment, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
-import { createDormer, rawRoofModel, roofContour, roofHeightAt, skylightPlacement } from '../model/roofs'
+import { createDormer, rawRoofModel, roofContour, roofHeightAt } from '../model/roofs'
+import { wheelDelta } from '../editor/wheel'
 import { isDialogOpen, openCompassDialog, openItemDialog, useDialogStore } from '../dialogs/dialogStore'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 import { handlePoints, hitCompass, hitHandle, hitItem, hitObserver, homeBounds, itemsInRect, type Handle } from './hitTest'
@@ -18,11 +18,11 @@ import {
   normalizeAngle,
   roomSnapPoints,
   snapAngle,
-  snapDoorOrWindowToWall,
   snapToFreeWallEnd,
   snapToPoints,
   type WallEndSnap,
 } from './magnetism'
+import { catalogPieceAt, snapDoorOrWindow } from './placement'
 import { PlanRenderer, type PlanPreview } from './PlanRenderer'
 import { RoofEdgeMenu, type RoofMenuTarget } from './RoofEdgeMenu'
 import { usePlanStore, zoomAt, type PlanView } from './planStore'
@@ -78,17 +78,6 @@ function dimensionPoint(home: Home, start: Point | null, point: Point, magnetism
   const snapped = snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale)
   if (snapped !== point) return roundPoint(snapped)
   return start ? magnetizeWallEnd(start, point, scale) : roundPoint(point)
-}
-
-/**
- * Tür bzw. Fenster an einer Wand einrasten, sonst als Dachfenster auf einem Dach; ein Dachfenster, das
- * keines mehr ist, steht wieder aufrecht in der Höhe aus dem Katalog.
- */
-function snapDoorOrWindow(home: Home, piece: HomePiece): Partial<HomePiece> | null {
-  const upright = piece.roofId || piece.pitch ? { pitch: 0, roofId: null, elevation: useCatalogStore.getState().findPiece(piece.catalogId ?? '')?.elevation ?? 0 } : null
-  const wall = snapDoorOrWindowToWall(home, piece)
-  if (wall) return { ...wall, ...upright }
-  return skylightPlacement(home, piece) ?? upright
 }
 
 /** Befehl, den eine Mausaktion beim Loslassen ausführt (und der vorher als Vorschau dient). */
@@ -299,11 +288,16 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
 
   useEffect(() => {
     const element = containerRef.current!
-    const observer = new ResizeObserver(([entry]) =>
-      setSize({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) }),
-    )
+    const observer = new ResizeObserver(([entry]) => {
+      const next = { width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) }
+      setSize(next)
+      usePlanStore.getState().setViewport(next)
+    })
     observer.observe(element)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      usePlanStore.getState().setViewport({ width: 0, height: 0 })
+    }
   }, [])
 
   const fit = useCallback(() => {
@@ -353,7 +347,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       const rect = element.getBoundingClientRect()
-      const factor = Math.pow(1.0015, -event.deltaY)
+      const factor = Math.pow(1.0015, -wheelDelta(event, rect.height))
       setView(zoomAt(usePlanStore.getState().view, factor, event.clientX - rect.left, event.clientY - rect.top))
     }
     element.addEventListener('wheel', onWheel, { passive: false })
@@ -591,9 +585,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     await catalog.load(catalog.language ?? 'en')
     const catalogPiece = useCatalogStore.getState().findPiece(catalogId)
     if (!catalogPiece) return
-    let piece = pieceFromCatalog(catalogPiece, point[0], point[1])
-    const snapped = magnetism && piece.doorOrWindowInfo ? snapDoorOrWindow(home, { ...piece, level: home.selectedLevel }) : null
-    if (snapped) piece = { ...piece, ...snapped }
+    const piece = catalogPieceAt(home, catalogPiece, point, magnetism)
     executeCommand({ type: 'addItems', furniture: [piece] })
     dispatch({ type: 'select', ids: [piece.id] })
   }

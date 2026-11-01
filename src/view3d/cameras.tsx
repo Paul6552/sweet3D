@@ -1,8 +1,9 @@
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
-import { MathUtils, Vector3, type PerspectiveCamera as ThreePerspectiveCamera } from 'three'
+import { MathUtils, Plane, Raycaster, Vector2, Vector3, type Mesh, type PerspectiveCamera as ThreePerspectiveCamera } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { wheelDelta } from '../editor/wheel'
 import type { ObserverCamera } from '../model/home'
 import { isUnderground, levelElevation, selectedLevel } from '../model/levels'
 import { dispatch, useEditorStore } from '../store/editorStore'
@@ -14,6 +15,13 @@ export interface SceneBounds {
 
 const NEAR = 5
 const FAR = 400000
+
+/** Anteil des Abstands zum Punkt unter der Maus, um den ein Rastschritt (100 px) heranfährt. */
+const ZOOM_STEP = 0.15
+/** Kleinster Schritt in cm, damit das Heranfahren in der Nähe nicht beliebig langsam wird. */
+const MIN_ZOOM_STEP = 15
+/** So nah fährt die Kamera höchstens an eine getroffene Fläche heran (nicht hindurch). */
+const MIN_SURFACE_DISTANCE = 20
 
 /**
  * Luftansicht: Orbit um das Projekt, nicht unter die Höhe des Drehpunkts. Beim Wechsel der Ebene
@@ -30,6 +38,63 @@ export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitR
   }, [bounds])
   const level = useEditorStore((s) => s.home!.selectedLevel)
   const underground = useEditorStore((s) => isUnderground(selectedLevel(s.home!)))
+  const floor = useEditorStore((s) => levelElevation(s.home!, s.home!.selectedLevel))
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+
+  // Mausrad: zum Punkt unter der Maus fahren statt zum festen Drehpunkt. Kamera und Drehpunkt
+  // wandern gemeinsam, daher bleibt man nicht vor dem Drehpunkt hängen; in der Nähe wird der Schritt
+  // kleiner, aber nie kleiner als MIN_ZOOM_STEP, und vor getroffenen Flächen hält die Kamera an.
+  useEffect(() => {
+    if (!controls) return
+    const element = gl.domElement
+    const raycaster = new Raycaster()
+    const ground = new Plane()
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const rect = element.getBoundingClientRect()
+      const steps = -wheelDelta(event, rect.height) / 100
+      if (steps === 0) return
+      const pointer = new Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(pointer, camera)
+      // Himmel (nur Hintergrund) nicht treffen; ausgeblendete Teile liegen auf einer anderen Schicht
+      const hit = raycaster.intersectObjects(scene.children, true).find((h) => h.object.visible && h.object.userData.photo !== false && (h.object as Mesh).isMesh)
+      let distance = hit?.distance
+      if (distance === undefined) {
+        ground.set(new Vector3(0, 1, 0), -floor)
+        const point = raycaster.ray.intersectPlane(ground, new Vector3())
+        if (point) distance = point.distanceTo(raycaster.ray.origin)
+      }
+      const hasHit = distance !== undefined
+      distance ??= camera.position.distanceTo(controls.target)
+
+      let move: number
+      if (steps > 0) {
+        move = Math.max(distance * (1 - Math.pow(1 - ZOOM_STEP, steps)), MIN_ZOOM_STEP * steps)
+        if (hasHit) move = Math.min(move, distance - MIN_SURFACE_DISTANCE)
+        if (move <= 0) return
+      } else {
+        move = -distance * (Math.pow(1 - ZOOM_STEP, steps) - 1)
+        const { center, radius } = boundsRef.current
+        const maxDistance = Math.max(radius * 6, 3000)
+        const room = maxDistance - camera.position.distanceTo(center)
+        if (room <= 0) return
+        move = Math.max(move, -room)
+      }
+      const shift = raycaster.ray.direction.clone().multiplyScalar(move)
+      camera.position.add(shift)
+      controls.target.add(shift)
+      // Drehpunkt auf der Blickrichtung in die Tiefe der angesehenen Fläche legen, damit danach um
+      // das gedreht wird, was man ansieht (die Blickrichtung ändert sich dabei nicht)
+      if (hasHit) {
+        const view = controls.target.clone().sub(camera.position).normalize()
+        controls.target.copy(camera.position).addScaledVector(view, Math.max(distance - move, MIN_SURFACE_DISTANCE * 5))
+      }
+      controls.update()
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [gl, scene, camera, controls, floor])
 
   // Andere Ebene gewählt: Drehpunkt und Kamera gemeinsam auf deren Höhe schieben, der Blickwinkel bleibt
   const shownLevel = useRef(level)
@@ -56,7 +121,7 @@ export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitR
     <>
       <PerspectiveCamera makeDefault fov={45} near={NEAR} far={FAR} />
       {/* Über dem Gelände nicht unter den Rasen; bei Untergeschossen bis knapp unter die Waagerechte */}
-      <OrbitControls makeDefault maxPolarAngle={underground ? Math.PI / 2 + 0.3 : Math.PI / 2 - 0.02} enableDamping />
+      <OrbitControls makeDefault maxPolarAngle={underground ? Math.PI / 2 + 0.3 : Math.PI / 2 - 0.02} enableDamping enableZoom={false} />
     </>
   )
 }

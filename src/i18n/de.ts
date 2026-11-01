@@ -48,6 +48,7 @@ export const de = {
     windows: 'Ansichten',
     ctrl: 'Strg',
     settings: 'Einstellungen',
+    github: 'Quellcode auf GitHub',
     language: 'Sprache',
     languageAuto: 'Browsersprache ({{language}})',
   },

@@ -3,6 +3,7 @@ import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined'
 import DownloadOutlined from '@mui/icons-material/DownloadOutlined'
 import ErrorOutlined from '@mui/icons-material/ErrorOutlined'
 import FolderOpenOutlined from '@mui/icons-material/FolderOpenOutlined'
+import GitHub from '@mui/icons-material/GitHub'
 import SyncOutlined from '@mui/icons-material/SyncOutlined'
 import Redo from '@mui/icons-material/Redo'
 import Undo from '@mui/icons-material/Undo'
@@ -233,6 +234,18 @@ export function EditorPage() {
               </Button>
             )}
             <SettingsMenu />
+            <Tooltip title={t('editor.github')}>
+              <IconButton
+                size="small"
+                component="a"
+                href="https://github.com/Paul6552/sweet3D"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t('editor.github')}
+              >
+                <GitHub fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Tooltip title={t('projects.download')}>
               <IconButton size="small" onClick={() => void download()} aria-label={t('projects.download')}>
                 <DownloadOutlined fontSize="small" />

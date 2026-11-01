@@ -50,6 +50,7 @@ export const en: Resources = {
     windows: 'Views',
     ctrl: 'Ctrl',
     settings: 'Settings',
+    github: 'Source code on GitHub',
     language: 'Language',
     languageAuto: 'Browser language ({{language}})',
   },

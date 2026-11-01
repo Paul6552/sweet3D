@@ -1,46 +1,38 @@
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CircleGeometry,
   CubeCamera,
   HalfFloatType,
   Mesh,
   MeshBasicMaterial,
+  MeshStandardMaterial,
+  NoColorSpace,
   PMREMGenerator,
   RepeatWrapping,
   Scene,
   SRGBColorSpace,
-  type Texture,
-  TextureLoader,
+  Texture,
+  Vector2,
   Vector3,
   WebGLCubeRenderTarget,
 } from 'three'
 import { LightProbeGenerator } from 'three/examples/jsm/lights/LightProbeGenerator.js'
 import type { MultiPolygon } from 'polygon-clipping'
 import { setSkyIrradiance } from './eyeAdaptation'
+import { argbToCss } from '../model/colors'
+import type { Surface } from '../model/home'
 import { groundGeometry } from './groundHoles'
+import { type GroundUniforms, patchGroundShader } from './groundShader'
+import { loadImage } from './materials'
 import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
 
-/** Rasen aus dem Texturkatalog von Sweet Home 3D. */
-const GRASS = '/catalog/resources/textures/grass.jpg'
-/** Größe einer Kachel in cm; größer als im Katalog, damit sich das Muster aus der Ferne nicht wiederholt. */
-const GRASS_TILE = 200
+/** Default lawn from the texture catalog of Sweet Home 3D; tile larger than in the catalog so the pattern does not repeat from afar. */
+const LAWN = { color: '/catalog/resources/textures/grass.jpg', tile: 200, tint: '#dfe6cf' }
+/** Shown while the textures load. */
+const LAWN_COLOR = '#5f7a3c'
 const GROUND_SIZE = 400000
 const SKY_RADIUS = 200000
-/**
- * Mischt die Kachel mit einer gedrehten, größeren Kopie von sich selbst, damit aus der Ferne
- * keine Streifen durch die Wiederholung entstehen.
- */
-function mixTiles(shader: { fragmentShader: string }) {
-  shader.fragmentShader = shader.fragmentShader.replace(
-    '#include <map_fragment>',
-    `#ifdef USE_MAP
-      vec4 tileA = texture2D(map, vMapUv);
-      vec4 tileB = texture2D(map, mat2(0.8, -0.6, 0.6, 0.8) * vMapUv * 0.29);
-      diffuseColor *= mix(tileA, tileB, 0.5);
-    #endif`,
-  )
-}
 
 /**
  * Himmelskuppel, die mit der Kamera mitwandert, und daraus berechnetes Umgebungslicht
@@ -114,29 +106,89 @@ export function Sky({ environmentSize, daylight }: { environmentSize: number; da
 }
 
 const NO_HOLES: MultiPolygon = []
+const DEFAULT_GROUND: Surface = { color: null, texture: null }
+
+interface GroundLook {
+  color: string
+  map: HTMLImageElement | null
+  normal: HTMLImageElement | null
+  roughness: HTMLImageElement | null
+  tile: [number, number]
+  variation: number
+}
+
+const optionalImage = (image: string | undefined) => (image ? loadImage(image).catch(() => null) : Promise.resolve(null))
+
+/** Images and parameters for the ground surface: default lawn, plain color or texture. */
+async function groundLook(ground: Surface): Promise<GroundLook> {
+  if (ground.texture) {
+    const { image, maps, width, height } = ground.texture
+    const [map, normal, roughness] = await Promise.all([optionalImage(image), optionalImage(maps?.normal), optionalImage(maps?.roughness)])
+    return { color: '#ffffff', map, normal, roughness, tile: [width || 100, height || 100], variation: 0.5 }
+  }
+  if (ground.color != null) return { color: argbToCss(ground.color), map: null, normal: null, roughness: null, tile: [100, 100], variation: 0.35 }
+  const map = await optionalImage(LAWN.color)
+  return { color: LAWN.tint, map, normal: null, roughness: null, tile: [LAWN.tile, LAWN.tile], variation: 1 }
+}
+
+function groundMaterial(look: GroundLook | null, anisotropy: number): MeshStandardMaterial {
+  const texture = (image: HTMLImageElement | null, color: boolean) => {
+    if (!image || !look) return null
+    const t = new Texture(image)
+    t.wrapS = t.wrapT = RepeatWrapping
+    // The shader computes its own coordinates; the repeat is for the path tracer of the photo mode
+    t.repeat.set(GROUND_SIZE / look.tile[0], GROUND_SIZE / look.tile[1])
+    t.colorSpace = color ? SRGBColorSpace : NoColorSpace
+    // Sharp also at grazing angles, otherwise the lawn blurs towards the horizon
+    t.anisotropy = anisotropy
+    t.needsUpdate = true
+    return t
+  }
+  const roughnessMap = texture(look?.roughness ?? null, false)
+  const material = new MeshStandardMaterial({
+    color: look?.color ?? LAWN_COLOR,
+    roughness: 1,
+    map: texture(look?.map ?? null, true),
+    normalMap: texture(look?.normal ?? null, false),
+    normalScale: new Vector2(0.8, 0.8),
+    roughnessMap,
+  })
+  const uniforms: GroundUniforms = {
+    groundTile: { value: look?.tile ?? [100, 100] },
+    groundVariation: { value: look?.variation ?? 0.5 },
+    groundFade: { value: [1500, 30000] },
+  }
+  material.onBeforeCompile = (shader) => patchGroundShader(shader, uniforms)
+  material.customProgramCacheKey = () => 'ground'
+  return material
+}
 
 /**
- * Rasenfläche bis zum Horizont knapp unter dem Gelände; fest am Ursprung, damit das Muster nicht
- * wandert. Über Untergeschossen hat sie Löcher ({@link groundHoles}) und hält dann als Erdreich
- * auch die Sonne von Kellerfenstern unter dem Gelände ab.
+ * Ground up to the horizon just below the terrain, fixed at the origin so the pattern does not
+ * move. The user chooses its look (default lawn, color or texture) in the environment dialog.
+ * Above basements it has holes ({@link groundHoles}) and then, as soil, also keeps the sun away
+ * from basement windows below the terrain.
  */
-export function Ground({ holes = NO_HOLES }: { holes?: MultiPolygon }) {
+export function Ground({ holes = NO_HOLES, ground = DEFAULT_GROUND }: { holes?: MultiPolygon; ground?: Surface }) {
   const gl = useThree((s) => s.gl)
-  const texture = useMemo<Texture>(() => {
-    const t = new TextureLoader().load(GRASS)
-    t.wrapS = t.wrapT = RepeatWrapping
-    t.repeat.set(GROUND_SIZE / GRASS_TILE, GROUND_SIZE / GRASS_TILE)
-    t.colorSpace = SRGBColorSpace
-    // Scharf auch unter flachem Blickwinkel, sonst verschwimmt der Rasen zum Horizont hin
-    t.anisotropy = gl.capabilities.getMaxAnisotropy()
-    return t
-  }, [gl])
-  useEffect(() => () => texture.dispose(), [texture])
+  const [look, setLook] = useState<GroundLook | null>(null)
+  const key = JSON.stringify(ground)
+  useEffect(() => {
+    let cancelled = false
+    void groundLook(JSON.parse(key) as Surface).then((loaded) => !cancelled && setLook(loaded))
+    return () => {
+      cancelled = true
+    }
+  }, [key])
+  const material = useMemo(() => groundMaterial(look, gl.capabilities.getMaxAnisotropy()), [look, gl])
+  useEffect(
+    () => () => {
+      for (const map of [material.map, material.normalMap, material.roughnessMap]) map?.dispose()
+      material.dispose()
+    },
+    [material],
+  )
   const geometry = useMemo(() => groundGeometry(GROUND_SIZE, holes), [holes])
   useEffect(() => () => geometry.dispose(), [geometry])
-  return (
-    <mesh rotation-x={-Math.PI / 2} position-y={-0.5} geometry={geometry} receiveShadow castShadow={holes.length > 0}>
-      <meshStandardMaterial map={texture} color="#dfe6cf" roughness={1} onBeforeCompile={mixTiles} />
-    </mesh>
-  )
+  return <mesh rotation-x={-Math.PI / 2} position-y={-0.5} geometry={geometry} material={material} receiveShadow castShadow={holes.length > 0} />
 }

@@ -209,6 +209,12 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
   )
   const { observer, time } = home.camera
   const { compass } = home
+  // Default lawn: no environment element, Sweet Home 3D then shows its own default ground
+  const { ground } = home.environment
+  const groundTexture = await texture(ground.texture, 'groundTexture', '    ')
+  const environment = groundTexture.length > 0 || ground.color != null
+    ? [withChildren(openTag('environment', { groundColor: color(ground) }), 'environment', groundTexture)]
+    : []
   const xml = [
     "<?xml version='1.0'?>",
     `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}'${home.selectedLevel ? ` selectedLevel='${escapeXml(home.selectedLevel)}'` : ''} wallHeight='${home.wallHeight}'>`,
@@ -216,6 +222,7 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
     ...(libraries.length > 0 ? [`  ${element('property', { name: LIBRARIES_PROPERTY, value: JSON.stringify(libraries) })}`] : []),
     ...(Object.keys(textureExtras).length > 0 ? [`  ${element('property', { name: TEXTURE_EXTRAS_PROPERTY, value: JSON.stringify(textureExtras) })}`] : []),
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
+    ...environment,
     `  ${element('compass', {
       x: compass.x,
       y: compass.y,

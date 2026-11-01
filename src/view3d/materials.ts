@@ -37,8 +37,7 @@ function surfaceTexture(image: string, ref: TextureRef, color: boolean): Texture
     created.repeat.set(1 / (ref.width || 100), 1 / (ref.height || 100))
     created.colorSpace = color ? SRGBColorSpace : NoColorSpace
     created.anisotropy = MAX_ANISOTROPY
-    void (isContentRef(image) ? contentUrl(contentKey(image)) : Promise.resolve(image))
-      .then((url) => (url ? new ImageLoader().loadAsync(url) : null))
+    void loadImage(image)
       .then((loaded) => {
         if (!loaded) return
         created.image = loaded
@@ -49,6 +48,11 @@ function surfaceTexture(image: string, ref: TextureRef, color: boolean): Texture
     texture = created
   }
   return texture
+}
+
+/** Loads the image behind a reference (URL or „content:…“); {@code null} if the content is missing. */
+export function loadImage(image: string): Promise<HTMLImageElement | null> {
+  return (isContentRef(image) ? contentUrl(contentKey(image)) : Promise.resolve(image)).then((url) => (url ? new ImageLoader().loadAsync(url) : null))
 }
 
 function textureKey(texture: TextureRef): string {

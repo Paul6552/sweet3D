@@ -343,6 +343,15 @@ export function defaultTime(): number {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
 }
 
+/** Ground of the 3D view: default (realistic lawn), a color or a texture. */
+export interface HomeEnvironment {
+  ground: Surface
+}
+
+export function defaultEnvironment(): HomeEnvironment {
+  return { ground: { color: null, texture: null } }
+}
+
 export interface Home {
   formatVersion: 1
   wallHeight: number
@@ -359,6 +368,8 @@ export interface Home {
   /** {@code time}: Zeitpunkt für den Sonnenstand in ms seit 1970 (UTC). */
   camera: { mode: CameraMode; observer: ObserverCamera; time: number }
   compass: Compass
+  /** Surroundings of the 3D view like HomeEnvironment in Sweet Home 3D. */
+  environment: HomeEnvironment
   /**
    * Benutzerdefinierte Bibliotheken, aus denen Möbel oder Texturen stammen, auch wenn sie hier
    * nicht installiert sind (z. B. aus einer weitergegebenen Datei), siehe catalog/libraries.ts.
@@ -384,6 +395,7 @@ export function createEmptyHome(): Home {
       time: defaultTime(),
     },
     compass: defaultCompass(),
+    environment: defaultEnvironment(),
   }
 }
 
@@ -408,6 +420,7 @@ export function normalizeHome(raw: unknown): Home {
     labels: home.labels ?? [],
     camera: { ...empty.camera, ...home.camera },
     compass,
+    environment: { ...empty.environment, ...home.environment },
     ...(home.libraries && home.libraries.length > 0 ? { libraries: home.libraries } : {}),
   }
 }

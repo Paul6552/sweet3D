@@ -7,6 +7,8 @@ export type DialogRequest =
   | { kind: 'newLabel'; x: number; y: number }
   /** Kompass und Lage des Projekts. */
   | { kind: 'compass' }
+  /** Ground of the 3D view. */
+  | { kind: 'environment' }
 
 interface DialogState {
   request: DialogRequest | null
@@ -20,6 +22,8 @@ export const useDialogStore = create<DialogState>((set) => ({
   open: (request) => set({ request }),
   close: () => set({ request: null }),
 }))
+
+export const openEnvironmentDialog = () => useDialogStore.getState().open({ kind: 'environment' })
 
 export const openCompassDialog = () => useDialogStore.getState().open({ kind: 'compass' })
 

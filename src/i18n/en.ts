@@ -264,6 +264,12 @@ export const en: Resources = {
       S: 'south', SSW: 'south-southwest', SW: 'southwest', WSW: 'west-southwest', W: 'west', WNW: 'west-northwest', NW: 'northwest', NNW: 'north-northwest',
     },
   },
+  environment: {
+    title: 'Ground and surroundings',
+    open: 'Ground and surroundings…',
+    ground: 'Ground',
+    groundHint: 'The default is a lawn. A color or texture (e.g. gravel, paving, soil) changes the whole ground around the house.',
+  },
   compass: {
     title: 'Compass',
     x: 'X',

@@ -262,6 +262,12 @@ export const de = {
       S: 'Süden', SSW: 'Südsüdwesten', SW: 'Südwesten', WSW: 'Westsüdwesten', W: 'Westen', WNW: 'Westnordwesten', NW: 'Nordwesten', NNW: 'Nordnordwesten',
     },
   },
+  environment: {
+    title: 'Boden und Umgebung',
+    open: 'Boden und Umgebung…',
+    ground: 'Boden',
+    groundHint: 'Standard ist ein Rasen. Mit einer Farbe oder Textur (z. B. Kies, Pflaster, Erde) wird der ganze Boden um das Haus geändert.',
+  },
   compass: {
     title: 'Kompass',
     x: 'X',

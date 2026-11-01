@@ -2,6 +2,7 @@ import CameraAlt from '@mui/icons-material/CameraAlt'
 import DirectionsWalk from '@mui/icons-material/DirectionsWalk'
 import FitScreen from '@mui/icons-material/FitScreen'
 import HighQuality from '@mui/icons-material/HighQuality'
+import Landscape from '@mui/icons-material/Landscape'
 import ThreeDRotation from '@mui/icons-material/ThreeDRotation'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
@@ -22,6 +23,7 @@ import type { CameraMode, Home } from '../model/home'
 import { levelElevation, visibleLevels } from '../model/levels'
 import { rawRoofModel } from '../model/roofs'
 import { homeBounds } from '../plan/hitTest'
+import { openEnvironmentDialog } from '../dialogs/dialogStore'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { Ground, Sky } from './Environment'
@@ -294,6 +296,11 @@ export function View3DPanel() {
           ))}
         </Menu>
         <SunPopover home={home} />
+        <Tooltip title={t('environment.open')}>
+          <IconButton size="small" onClick={openEnvironmentDialog} aria-label={t('environment.open')}>
+            <Landscape fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <Tooltip title={t('photo.title')}>
           <IconButton size="small" onClick={() => setPhotoOpen(true)} aria-label={t('photo.title')}>
             <CameraAlt fontSize="small" />
@@ -323,7 +330,7 @@ export function View3DPanel() {
             <IndoorLighting home={geometry} light={light} bright={brightRooms} adapt={mode === 'aerial'} />
             <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
-            <Ground holes={holes} />
+            <Ground holes={holes} ground={home.environment.ground} />
             <HomeScene
               home={home}
               selection={selection}

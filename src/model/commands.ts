@@ -1,4 +1,4 @@
-import { homeItems, type Compass, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
+import { homeItems, type Compass, type HomeEnvironment, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
 import { settleRoofLevel, sortLevels } from './levels'
 import { refitSkylights } from './roofs'
 
@@ -27,6 +27,7 @@ export type HomeCommand =
   /** Löscht die Ebene samt ihrer Objekte. */
   | { type: 'deleteLevel'; id: string }
   | { type: 'updateCompass'; change: Partial<Compass> }
+  | { type: 'updateEnvironment'; change: Partial<HomeEnvironment> }
   /** Mehrere Befehle als ein Undo-Schritt. */
   | { type: 'batch'; commands: HomeCommand[] }
 
@@ -138,6 +139,9 @@ export function applyCommand(home: Home, command: HomeCommand): void {
     }
     case 'updateCompass':
       Object.assign(home.compass, command.change)
+      break
+    case 'updateEnvironment':
+      Object.assign(home.environment, command.change)
       break
     case 'batch':
       for (const sub of command.commands) applyCommand(home, sub)

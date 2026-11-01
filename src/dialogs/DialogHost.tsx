@@ -1,4 +1,5 @@
 import { CompassDialog } from './CompassDialog'
+import { EnvironmentDialog } from './EnvironmentDialog'
 import { ItemDialog } from './ItemDialog'
 import { LabelDialog } from './LabelDialog'
 import { useDialogStore } from './dialogStore'
@@ -15,5 +16,7 @@ export function DialogHost() {
       return <LabelDialog key={`${request.x},${request.y}`} x={request.x} y={request.y} onClose={close} />
     case 'compass':
       return <CompassDialog onClose={close} />
+    case 'environment':
+      return <EnvironmentDialog onClose={close} />
   }
 }

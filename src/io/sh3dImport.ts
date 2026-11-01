@@ -55,6 +55,9 @@ export class Sh3dImportError extends Error {
 }
 
 // Regale (shelfUnit) werden wie normale Möbel übernommen, ohne ihre Fächer
+/** Ground color of a new HomeEnvironment in Sweet Home 3D, written even when the user never changed it. */
+const SH3D_DEFAULT_GROUND = 0xa8553f
+
 const FURNITURE_ELEMENTS = new Set(['pieceOfFurniture', 'doorOrWindow', 'light', 'shelfUnit'])
 
 /**
@@ -311,6 +314,15 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
   const cameras = [...root.children].filter((e) => e.nodeName === 'observerCamera' || e.nodeName === 'camera')
   const activeCamera = cameras.find((e) => e.getAttribute('attribute') === (home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'))
   home.camera.time = [activeCamera, ...cameras].map((e) => e && num(e, 'time')).find((time) => time != null) ?? home.camera.time
+
+  // Ground of the 3D view; the constructor default of HomeEnvironment (no texture, brown) stays our default lawn
+  const environment = [...root.children].find((e) => e.nodeName === 'environment')
+  if (environment) {
+    const groundTexture = textureOf(environment, 'groundTexture')
+    const groundColor = parseArgb(environment.getAttribute('groundColor'))
+    if (groundTexture) home.environment.ground = { color: null, texture: groundTexture }
+    else if (groundColor !== null && (groundColor & 0xffffff) !== SH3D_DEFAULT_GROUND) home.environment.ground = { color: groundColor, texture: null }
+  }
 
   const compass = [...root.children].find((e) => e.nodeName === 'compass')
   if (!compass) Object.assign(home.compass, compassBesideHome(home, home.compass.diameter))

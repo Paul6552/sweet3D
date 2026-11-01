@@ -17,11 +17,13 @@ export function FurnitureListPanel() {
   const { t } = useTranslation()
   const allFurniture = useEditorStore((s) => s.home?.furniture)
   const level = useEditorStore((s) => (s.home?.levels.length ? s.home.selectedLevel : undefined))
-  // Wie in Sweet Home 3D nur die Möbel der gewählten Ebene
-  const furniture = useMemo(
-    () => (level === undefined ? (allFurniture ?? []) : (allFurniture ?? []).filter((p) => p.level === level)),
-    [allFurniture, level],
-  )
+  // Like Sweet Home 3D: only the furniture of the selected level, sorted by name
+  const furniture = useMemo(() => {
+    const all = allFurniture ?? []
+    const onLevel = level === undefined ? [...all] : all.filter((p) => p.level === level)
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+    return onLevel.sort((a, b) => collator.compare(a.name ?? '', b.name ?? ''))
+  }, [allFurniture, level])
   const selection = useEditorStore((s) => s.selection)
 
   if (furniture.length === 0) {

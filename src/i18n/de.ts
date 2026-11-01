@@ -80,6 +80,8 @@ export const de = {
     listView: 'Listenansicht',
     allLibraries: 'Alle Kataloge',
     builtin: 'Standardkatalog',
+    filter: 'Nach Kategorie filtern',
+    allCategories: 'Alle Kategorien',
   },
   libraries: {
     bundled: 'Mitgelieferte Kataloge',

@@ -82,6 +82,8 @@ export const en: Resources = {
     listView: 'List view',
     allLibraries: 'All catalogs',
     builtin: 'Default catalog',
+    filter: 'Filter by category',
+    allCategories: 'All categories',
   },
   libraries: {
     bundled: 'Bundled catalogs',

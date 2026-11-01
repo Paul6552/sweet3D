@@ -1,11 +1,15 @@
 import ChairOutlined from '@mui/icons-material/ChairOutlined'
+import FilterListOutlined from '@mui/icons-material/FilterListOutlined'
 import GridViewOutlined from '@mui/icons-material/GridViewOutlined'
 import LibraryAddOutlined from '@mui/icons-material/LibraryAddOutlined'
 import Search from '@mui/icons-material/Search'
 import ViewListOutlined from '@mui/icons-material/ViewListOutlined'
+import Badge from '@mui/material/Badge'
 import Box from '@mui/material/Box'
 import ButtonBase from '@mui/material/ButtonBase'
+import Checkbox from '@mui/material/Checkbox'
 import CircularProgress from '@mui/material/CircularProgress'
+import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
 import InputAdornment from '@mui/material/InputAdornment'
 import List from '@mui/material/List'
@@ -13,6 +17,7 @@ import ListItemButton from '@mui/material/ListItemButton'
 import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemText from '@mui/material/ListItemText'
 import ListSubheader from '@mui/material/ListSubheader'
+import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
@@ -65,6 +70,9 @@ export function CatalogPanel() {
   const [library, setLibrary] = useState(ALL)
   const [view, setView] = useState(initialView)
   const [managing, setManaging] = useState(false)
+  /** Gewählte Kategorien; leer: alle. */
+  const [selected, setSelected] = useState<string[]>([])
+  const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null)
   const pieceCount = useEditorStore((s) => s.home?.furniture.length ?? 0)
 
   useEffect(() => {
@@ -72,20 +80,35 @@ export function CatalogPanel() {
   }, [i18n.resolvedLanguage, load])
 
   const libraryFilter = libraries.some((l) => l.id === library) || library === BUILTIN ? library : ALL
-  const categories = useMemo(
+  // Kategorien mit Möbeln im gewählten Katalog, alphabetisch für das Filtermenü
+  const libraryCategories = useMemo(
     () =>
       (furniture?.categories ?? [])
         .map((c) => ({
           name: c.name,
           pieces: c.pieces.filter(
-            (p) =>
-              (libraryFilter === ALL || (libraryFilter === BUILTIN ? !p.libraryId : p.libraryId === libraryFilter)) &&
-              matches(p, c.name, query.trim()),
+            (p) => libraryFilter === ALL || (libraryFilter === BUILTIN ? !p.libraryId : p.libraryId === libraryFilter),
           ),
         }))
         .filter((c) => c.pieces.length > 0),
-    [furniture, query, libraryFilter],
+    [furniture, libraryFilter],
   )
+  const categoryNames = useMemo(
+    () => libraryCategories.map((c) => c.name).sort((a, b) => a.localeCompare(b, i18n.resolvedLanguage)),
+    [libraryCategories, i18n.resolvedLanguage],
+  )
+  // Gewählte Kategorien, die es im aktuellen Katalog nicht gibt, filtern nicht
+  const activeCategories = useMemo(() => selected.filter((name) => categoryNames.includes(name)), [selected, categoryNames])
+  const categories = useMemo(
+    () =>
+      libraryCategories
+        .filter((c) => activeCategories.length === 0 || activeCategories.includes(c.name))
+        .map((c) => ({ name: c.name, pieces: c.pieces.filter((p) => matches(p, c.name, query.trim())) }))
+        .filter((c) => c.pieces.length > 0),
+    [libraryCategories, query, activeCategories],
+  )
+  const toggleCategory = (name: string) =>
+    setSelected(activeCategories.includes(name) ? activeCategories.filter((n) => n !== name) : [...activeCategories, name])
 
   const toggleView = () => {
     const next = view === 'grid' ? 'list' : 'grid'
@@ -160,6 +183,38 @@ export function CatalogPanel() {
             },
           }}
         />
+        <Tooltip title={t('catalog.filter')}>
+          <IconButton
+            size="small"
+            onClick={(e) => setFilterAnchor(e.currentTarget)}
+            aria-label={t('catalog.filter')}
+            aria-haspopup="menu"
+            color={activeCategories.length > 0 ? 'primary' : 'default'}
+            sx={{ alignSelf: 'center' }}
+          >
+            <Badge badgeContent={activeCategories.length} color="primary" overlap="circular">
+              <FilterListOutlined fontSize="small" />
+            </Badge>
+          </IconButton>
+        </Tooltip>
+        <Menu
+          anchorEl={filterAnchor}
+          open={filterAnchor !== null}
+          onClose={() => setFilterAnchor(null)}
+          slotProps={{ paper: { sx: { maxHeight: 420 } } }}
+        >
+          <MenuItem dense onClick={() => setSelected([])}>
+            <Checkbox size="small" edge="start" disableRipple checked={activeCategories.length === 0} sx={{ py: 0 }} />
+            <ListItemText primary={t('catalog.allCategories')} />
+          </MenuItem>
+          <Divider />
+          {categoryNames.map((name) => (
+            <MenuItem key={name} dense onClick={() => toggleCategory(name)}>
+              <Checkbox size="small" edge="start" disableRipple checked={activeCategories.includes(name)} sx={{ py: 0 }} />
+              <ListItemText primary={name} />
+            </MenuItem>
+          ))}
+        </Menu>
         {libraries.length > 0 && (
           <TextField select size="small" value={libraryFilter} onChange={(e) => setLibrary(e.target.value)} sx={{ minWidth: 120, maxWidth: 180 }}>
             <MenuItem value={ALL}>{t('catalog.allLibraries')}</MenuItem>

@@ -24,9 +24,9 @@ Tests are colocated (`*.test.ts`) and cover pure model/geometry code (levels, ro
 
 ## Conventions
 
-- Code comments, test names and UI-facing default strings are **German**.
+- Code comments (including inline comments) must always be in **English** from now on, even though existing comments are German. Test names and UI-facing default strings stay **German**.
 - All commit messages (subject and body) must be in **English**, without exception — even though older commits in the history are German. Subjects use an `Area: description` style (e.g. `Roof: dormers`, `Levels: basements below the terrain`).
-- Commit directly on `main` and push to `origin main` after committing; no feature branches or pull requests.
+- **Never commit or push automatically.** Only commit and/or push when the developer explicitly asks for it. When asked, commit directly on `main` (and push to `origin main` only if pushing was requested); no feature branches or pull requests.
 - All UI text goes through i18next; add keys to **both** `src/i18n/de.ts` and `src/i18n/en.ts` (they mirror each other).
 - Model units follow `com.eteks.sweethome3d.model`: lengths in **cm**, angles in **radians**, so `.sh3d` import/export maps 1:1. Keep new fields round-trippable through `src/io/sh3dImport.ts` / `sh3dExport.ts` where Sweet Home 3D has an equivalent.
 

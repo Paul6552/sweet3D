@@ -96,7 +96,7 @@ function Effects({ profile }: { profile: QualityProfile }) {
   if (!profile.ao && !profile.bloom) return null
   return (
     <EffectComposer multisampling={0}>
-      <N8AO aoRadius={60} distanceFalloff={0.6} intensity={2.2} halfRes={profile.aoHalfRes} quality={profile.aoHalfRes ? 'medium' : 'high'} />
+      <N8AO aoRadius={60} distanceFalloff={0.6} intensity={1.4} halfRes={profile.aoHalfRes} quality={profile.aoHalfRes ? 'medium' : 'high'} />
       <>{profile.bloom && <Bloom mipmapBlur luminanceThreshold={1} intensity={0.25} />}</>
       <SMAA />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
@@ -316,7 +316,7 @@ export function View3DPanel() {
             <Sky environmentSize={profile.environmentSize} daylight={light} />
             <Lights bounds={shadowBounds} profile={profile} light={light} />
             <ShadowUpdates />
-            <IndoorLighting home={geometry} light={light} bright={brightRooms} />
+            <IndoorLighting home={geometry} light={light} bright={brightRooms} adapt={mode === 'aerial'} />
             <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground />

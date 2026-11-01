@@ -21,20 +21,23 @@ import {
   CubeCamera,
   DirectionalLight,
   DoubleSide,
+  HalfFloatType,
   type Material,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
+  NearestFilter,
   PerspectiveCamera,
   PointLight,
   type Scene,
   Scene as ThreeScene,
-  type ShaderMaterial,
+  ShaderMaterial,
   SRGBColorSpace,
   Vector3,
   WebGLCubeRenderTarget,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from 'three'
 import { WebGLPathTracer } from 'three-gpu-pathtracer'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
@@ -42,6 +45,7 @@ import { compileOnce, slimPathTracerShader } from './pathTracerShader'
 import { createSky, GROUND_BOUNCE } from './sky'
 import { currentExposure } from './eyeAdaptation'
 import { useBrightRoomsStore } from './brightRooms'
+import { INDOOR_GLSL, indoorUniforms } from './indoorLight'
 
 /** Szene und Kamera der 3D-Ansicht zum Zeitpunkt des Fotos. */
 export interface SceneHandle {
@@ -206,6 +210,72 @@ function photoScene(source: Scene, renderer: WebGLRenderer): { scene: ThreeScene
 }
 
 /**
+ * Anpassung je Raum wie in der Luftansicht (siehe indoorLight): je Pixel des Fotos der Faktor, um den
+ * das Licht der dort sichtbaren Fläche angehoben wird (Kanal r, 1 im Freien). Für die Kamera
+ * unsichtbare Decken zählen nicht.
+ */
+function adaptationImage(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera, width: number, height: number): WebGLRenderTarget {
+  const target = new WebGLRenderTarget(width, height, { type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter })
+  const material = new ShaderMaterial({
+    uniforms: indoorUniforms,
+    side: DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld;
+      varying vec3 vWorldNormal;
+      void main() {
+        vec4 world = modelMatrix * vec4( position, 1.0 );
+        vWorld = world.xyz;
+        vWorldNormal = mat3( modelMatrix ) * normal;
+        gl_Position = projectionMatrix * viewMatrix * world;
+      }`,
+    fragmentShader: /* glsl */ `
+      ${INDOOR_GLSL}
+      varying vec3 vWorld;
+      varying vec3 vWorldNormal;
+      void main() {
+        // Wie in der 3D-Ansicht etwas vor der Fläche nachschlagen
+        vec3 n = dot( vWorldNormal, vWorldNormal ) > 0.0 ? normalize( vWorldNormal ) * ( gl_FrontFacing ? 1.0 : - 1.0 ) : vec3( 0.0 );
+        vec2 uv;
+        float factor = 1.0;
+        if ( indoorUv( vWorld + n * 15.0, uv ) ) factor = mix( 1.0, texture2D( indoorRooms, uv ).g, indoorAdapt );
+        gl_FragColor = vec4( factor, 0.0, 0.0, 1.0 );
+      }`,
+  })
+  const hidden: Mesh[] = []
+  scene.traverse((object) => {
+    if (object instanceof Mesh && object.visible && (object.material as { matte?: boolean }).matte) {
+      object.visible = false
+      hidden.push(object)
+    }
+  })
+  const background = scene.background
+  const clearColor = renderer.getClearColor(new Color())
+  const clearAlpha = renderer.getClearAlpha()
+  scene.background = null
+  scene.overrideMaterial = material
+  renderer.setRenderTarget(target)
+  renderer.setClearColor(0xffffff, 1)
+  renderer.clear()
+  renderer.render(scene, camera)
+  renderer.setRenderTarget(null)
+  renderer.setClearColor(clearColor, clearAlpha)
+  scene.overrideMaterial = null
+  scene.background = background
+  hidden.forEach((mesh) => (mesh.visible = true))
+  material.dispose()
+  return target
+}
+
+/** Lässt die Ausgabe des Pathtracers jedes Pixel vor dem Tonemapping mit dem Bild der Anpassung multiplizieren. */
+function applyAdaptation(output: ShaderMaterial, adaptation: WebGLRenderTarget) {
+  output.uniforms.adaptationMap = { value: adaptation.texture }
+  output.fragmentShader = output.fragmentShader
+    .replace('uniform float opacity;', 'uniform float opacity;\nuniform sampler2D adaptationMap;')
+    .replace('res.xyz = toneMapping( res.xyz );', 'res.xyz = toneMapping( res.xyz * texelFetch( adaptationMap, px, 0 ).r );')
+  output.needsUpdate = true
+}
+
+/**
  * Fotorealistisches Standbild der aktuellen Ansicht per Pathtracing: Licht wird physikalisch
  * korrekt verfolgt (indirektes Licht, weiche Schatten, Spiegelungen, Glas). Das Bild wird mit
  * jedem Durchgang rauschärmer.
@@ -244,8 +314,8 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
     renderer.setSize(width, height, false)
     renderer.outputColorSpace = SRGBColorSpace
     renderer.toneMapping = ACESFilmicToneMapping
-    // Wie die 3D-Ansicht an Innenräume angepasst
-    renderer.toneMappingExposure = 0.9 * currentExposure()
+    // Wie die 3D-Ansicht an Innenräume angepasst (Besucher); in der Luftansicht je Raum, siehe unten
+    renderer.toneMappingExposure = currentExposure()
     const source = current.camera as PerspectiveCamera
     const camera = new PerspectiveCamera(source.fov, width / height, source.near, source.far)
     camera.position.setFromMatrixPosition(source.matrixWorld)
@@ -254,7 +324,13 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
     const { scene, dispose } = photoScene(current.scene, renderer)
     const tracer = new WebGLPathTracer(renderer)
     // Fehlt in den Typen der Bibliothek
-    const internals = tracer as unknown as { isCompiling: boolean; _pathTracer: { material: ShaderMaterial & { onBeforeRender: () => void } } }
+    const internals = tracer as unknown as {
+      isCompiling: boolean
+      _pathTracer: { material: ShaderMaterial & { onBeforeRender: () => void } }
+      _quad: { material: ShaderMaterial }
+    }
+    const adaptation = indoorUniforms.indoorAdapt.value > 0 ? adaptationImage(renderer, scene, camera, width, height) : null
+    if (adaptation) applyAdaptation(internals._quad.material, adaptation)
     // Kleinerer Shader, der auch auf schwacher Grafik schnell genug kompiliert
     slimPathTracerShader(internals._pathTracer.material, scene)
     tracer.bounces = 5
@@ -279,6 +355,7 @@ export function PhotoDialog({ open, onClose, handle }: { open: boolean; onClose:
       cancelAnimationFrame(frame)
       tracer.dispose()
       worker.dispose()
+      adaptation?.dispose()
       dispose()
       renderer.dispose()
     }

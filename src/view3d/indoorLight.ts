@@ -7,10 +7,9 @@ import {
   LinearFilter,
   type Material,
   MeshStandardMaterial,
-  RedFormat,
   RGBAFormat,
+  RGFormat,
   ShaderChunk,
-  UnsignedByteType,
   Vector2,
   type Vector3,
   Vector4,
@@ -21,6 +20,7 @@ import { distanceToSegment, pointInPolygon, type Point, wallPolygon } from '../m
 import type { Home, HomePiece, Wall } from '../model/home'
 import { defaultWallHeight, visibleLevels } from '../model/levels'
 import { homeBounds } from '../plan/hitTest'
+import { adaptationFor, onSkyIrradiance, outdoorIrradiance } from './eyeAdaptation'
 import type { Daylight } from './sky'
 
 /**
@@ -45,8 +45,11 @@ const WINDOW_SILL = 30
 const RECEIVER_HEIGHT = 100
 /** Verstärkung des Himmelslichts durch Fenster: Räume mit Fenstern sollen nicht düster wirken. */
 const WINDOW_GAIN = 2.5
-/** Mittlerer Reflexionsgrad von Wänden, Boden und Decke. */
-const REFLECTANCE = 0.5
+/**
+ * Mittlerer Reflexionsgrad von Wänden, Boden und Decke, nach Fläche gewichtet: weiße Decke etwa
+ * 0,8, helle Wände 0,7, Boden 0,3.
+ */
+const REFLECTANCE = 0.62
 /**
  * Anteil des einfallenden Lichts, der als zurückgeworfenes Licht im Raum ankommt: Licht wird
  * zwischen den Flächen mehrfach reflektiert (Split-Flux-Verfahren, Φ·ρ / (S·(1−ρ))).
@@ -427,13 +430,16 @@ export function computeIndoorLight(home: Home): IndoorLight | null {
 
 const emptyMap = new DataTexture(new Uint16Array([0, 0, 0, DataUtils.toHalfFloat(1)]), 1, 1, RGBAFormat, HalfFloatType)
 emptyMap.needsUpdate = true
-const emptyRooms = new DataTexture(new Uint8Array([0]), 1, 1, RedFormat, UnsignedByteType)
+const emptyRooms = new DataTexture(new Uint16Array([0, DataUtils.toHalfFloat(1)]), 1, 1, RGFormat, HalfFloatType)
 emptyRooms.needsUpdate = true
 
 /** Gemeinsame Uniforms aller Materialien des Hauses. */
 const uniforms = {
   indoorMap: { value: emptyMap as DataTexture },
-  /** 1 in überdachten Räumen: dort gibt es bei „Räume immer hell“ keine Schatten. */
+  /**
+   * r: 1 in überdachten Räumen, dort gibt es bei „Räume immer hell“ keine Schatten; g: Anpassung
+   * des Auges an den Raum (1 im Freien), siehe {@link adaptationFor}.
+   */
   indoorRooms: { value: emptyRooms as DataTexture },
   /** minX, minZ, 1 / Breite, 1 / Tiefe der Karte in cm. */
   indoorGrid: { value: new Vector4(0, 0, 1, 1) },
@@ -444,7 +450,12 @@ const uniforms = {
   indoorCount: { value: 0 },
   /** 0: Räume immer hell (Himmelslicht überall), 1: nur durch Öffnungen. */
   indoorEnabled: { value: 1 },
+  /** 1: jeder Raum wird so hell gezeigt, wie das an ihn angepasste Auge ihn sieht (Luftansicht). */
+  indoorAdapt: { value: 0 },
 }
+
+/** Uniforms der Innenraumkarten, z. B. für das Bild der Anpassung im Foto-Modus. */
+export const indoorUniforms = uniforms
 
 /** Zuletzt geschriebene Karten mit dem zurückgeworfenen Licht je Ebene und Raum (für die Augenanpassung). */
 let written: { data: IndoorLight; fills: Color[][] } | null = null
@@ -485,11 +496,11 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
     texture.magFilter = texture.minFilter = LinearFilter
     uniforms.indoorMap.value = texture
     if (uniforms.indoorRooms.value !== emptyRooms) uniforms.indoorRooms.value.dispose()
-    const rooms = new DataTexture(new Uint8Array(cells * layers.length), grid.nx, grid.ny * layers.length, RedFormat, UnsignedByteType)
+    const rooms = new DataTexture(new Uint16Array(cells * layers.length * 2), grid.nx, grid.ny * layers.length, RGFormat, HalfFloatType)
     rooms.magFilter = rooms.minFilter = LinearFilter
     uniforms.indoorRooms.value = rooms
   }
-  const roomPixels = uniforms.indoorRooms.value.image.data as Uint8Array
+  const roomPixels = uniforms.indoorRooms.value.image.data as Uint16Array
   const pixels = texture.image.data as Uint16Array
   const sun = light.direction
   const fills = layers.map((layer) => {
@@ -503,8 +514,16 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
     return fill
   })
   written = { data, fills }
+  const outside = outdoorIrradiance(light)
+  const one = DataUtils.toHalfFloat(1)
+  const zero = DataUtils.toHalfFloat(0)
   layers.forEach((layer, n) => {
     const fill = fills[n]
+    const adaptation = layer.skyAverage.map((sky, l) => {
+      if (l <= OUTSIDE || !layer.roofed[l]) return one
+      const f = fill[l]
+      return DataUtils.toHalfFloat(adaptationFor(sky, 0.2126 * f.r + 0.7152 * f.g + 0.0722 * f.b, outside))
+    })
     const offset = n * cells * 4
     for (let index = 0; index < cells; index++) {
       const l = layer.label[index]
@@ -514,7 +533,10 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
       pixels[p + 1] = DataUtils.toHalfFloat(c?.g ?? 0)
       pixels[p + 2] = DataUtils.toHalfFloat(c?.b ?? 0)
       pixels[p + 3] = DataUtils.toHalfFloat(layer.sky[index])
-      roomPixels[n * cells + index] = l > OUTSIDE && layer.roofed[l] ? 255 : 0
+      const r = (n * cells + index) * 2
+      const roofed = l > OUTSIDE && layer.roofed[l]
+      roomPixels[r] = roofed ? one : zero
+      roomPixels[r + 1] = roofed ? adaptation[l] : one
     }
     uniforms.indoorLevels.value[n].set(layer.bottom, layer.top)
   })
@@ -529,7 +551,7 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
  * Berechnet die Karten neu, wenn sich Wände, Räume, Türen, Fenster oder Leuchten ändern, und
  * schreibt sie bei jedem neuen Sonnenstand. {@code bright}: Räume immer hell (zum Möblieren).
  */
-export function IndoorLighting({ home, light, bright }: { home: Home; light: Daylight; bright: boolean }) {
+export function IndoorLighting({ home, light, bright, adapt }: { home: Home; light: Daylight; bright: boolean; adapt: boolean }) {
   const { walls, rooms, furniture, levels, selectedLevel, wallHeight } = home
   // Andere Möbel beeinflussen das Licht nicht; beim Verschieben eines Stuhls nichts neu berechnen
   const relevant = JSON.stringify(
@@ -542,10 +564,17 @@ export function IndoorLighting({ home, light, bright }: { home: Home; light: Day
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relevant fasst die Türen, Fenster und Leuchten zusammen
     [walls, rooms, relevant, levels, selectedLevel, wallHeight],
   )
-  useEffect(() => writeIndoorLight(data, light), [data, light])
+  useEffect(() => {
+    writeIndoorLight(data, light)
+    // Die Anpassung je Raum hängt vom gemessenen Himmelslicht ab
+    return onSkyIrradiance(() => writeIndoorLight(data, light))
+  }, [data, light])
   useEffect(() => {
     uniforms.indoorEnabled.value = bright ? 0 : 1
   }, [bright])
+  useEffect(() => {
+    uniforms.indoorAdapt.value = adapt && !bright ? 1 : 0
+  }, [adapt, bright])
   return null
 }
 
@@ -566,9 +595,8 @@ vIndoorPosition = ( modelMatrix * indoorPosition ).xyz;
 vIndoorNormal = mat3( modelMatrix ) * objectNormal;
 `
 
-const FRAGMENT_HEAD = /* glsl */ `
-varying vec3 vIndoorPosition;
-varying vec3 vIndoorNormal;
+/** Uniforms und Nachschlagen in den Karten, auch für eigene Shader (Foto-Modus). */
+export const INDOOR_GLSL = /* glsl */ `
 uniform sampler2D indoorMap;
 uniform sampler2D indoorRooms;
 uniform vec4 indoorGrid;
@@ -576,6 +604,7 @@ uniform vec2 indoorSize;
 uniform vec2 indoorLevels[ ${MAX_LAYERS} ];
 uniform int indoorCount;
 uniform float indoorEnabled;
+uniform float indoorAdapt;
 
 // Stelle in den Karten; false außerhalb (im Freien)
 bool indoorUv( vec3 p, out vec2 uv ) {
@@ -600,7 +629,14 @@ const FRAGMENT_LOOKUP = /* glsl */ `
 vec3 indoorNormal = dot( vIndoorNormal, vIndoorNormal ) > 0.0 ? normalize( vIndoorNormal ) * faceDirection : vec3( 0.0 );
 vec2 indoorPoint;
 bool indoorInside = indoorUv( vIndoorPosition + indoorNormal * 15.0, indoorPoint );
-bool indoorShadows = indoorEnabled > 0.5 || !indoorInside || texture2D( indoorRooms, indoorPoint ).r < 0.5;
+vec2 indoorRoom = indoorInside ? texture2D( indoorRooms, indoorPoint ).rg : vec2( 0.0, 1.0 );
+bool indoorShadows = indoorEnabled > 0.5 || indoorRoom.r < 0.5;
+`
+
+/** Anpassung an den Raum: hebt alles Licht gemeinsam an, Verhältnisse und Schatten bleiben. */
+const FRAGMENT_ADAPT = /* glsl */ `
+outgoingLight *= mix( 1.0, indoorRoom.g, indoorAdapt );
+#include <opaque_fragment>
 `
 
 /** rgb: zurückgeworfenes Licht, a: Anteil des Himmelslichts. */
@@ -624,9 +660,10 @@ function indoorShader(shader: WebGLProgramParametersWithUniforms) {
     .replace('#include <common>', `#include <common>\n${VERTEX_HEAD}`)
     .replace('#include <project_vertex>', `#include <project_vertex>\n${VERTEX_BODY}`)
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', `#include <common>\n${FRAGMENT_HEAD}`)
+    .replace('#include <common>', `#include <common>\n${VERTEX_HEAD}\n${INDOOR_GLSL}`)
     .replace('#include <lights_fragment_begin>', `${FRAGMENT_LOOKUP}\n${ShaderChunk.lights_fragment_begin.replaceAll('( directLight.visible && receiveShadow )', '( directLight.visible && receiveShadow && indoorShadows )')}`)
     .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>\n${FRAGMENT_BODY}`)
+    .replace('#include <opaque_fragment>', FRAGMENT_ADAPT)
 }
 
 /** Lässt ein Material des Hauses die Innenraumkarte lesen (nur physikalisch basierte Materialien). */

@@ -236,7 +236,7 @@ export interface DoorOrWindowInfo {
 export interface Level {
   id: string
   name: string
-  /** Höhe des Fußbodens über dem Gelände in cm. */
+  /** Höhe des Fußbodens über dem Gelände in cm; negativ bei Untergeschossen. */
   elevation: number
   /** Dicke der Decke darunter. */
   floorThickness: number

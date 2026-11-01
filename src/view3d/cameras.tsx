@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { MathUtils, Vector3, type PerspectiveCamera as ThreePerspectiveCamera } from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { ObserverCamera } from '../model/home'
-import { levelElevation } from '../model/levels'
+import { isUnderground, levelElevation, selectedLevel } from '../model/levels'
 import { dispatch, useEditorStore } from '../store/editorStore'
 
 export interface SceneBounds {
@@ -15,7 +15,11 @@ export interface SceneBounds {
 const NEAR = 5
 const FAR = 400000
 
-/** Luftansicht: Orbit um das Projekt, nicht über den Boden hinaus. */
+/**
+ * Luftansicht: Orbit um das Projekt, nicht unter die Höhe des Drehpunkts. Beim Wechsel der Ebene
+ * wandert der Drehpunkt mit der Kamera auf die Höhe der Ebene; bei Untergeschossen liegt er unter
+ * dem Gelände, sodass man von der Seite durch die Erde hineinsieht (der Rasen ist von unten unsichtbar).
+ */
 export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitRequest: number }) {
   // Kamera und Steuerung erst nach dem Registrieren als Standard (makeDefault) verwenden
   const camera = useThree((s) => s.camera) as ThreePerspectiveCamera
@@ -24,6 +28,19 @@ export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitR
   useEffect(() => {
     boundsRef.current = bounds
   }, [bounds])
+  const level = useEditorStore((s) => s.home!.selectedLevel)
+  const underground = useEditorStore((s) => isUnderground(selectedLevel(s.home!)))
+
+  // Andere Ebene gewählt: Drehpunkt und Kamera gemeinsam auf deren Höhe schieben, der Blickwinkel bleibt
+  const shownLevel = useRef(level)
+  useEffect(() => {
+    if (!controls || shownLevel.current === level) return
+    shownLevel.current = level
+    const shift = new Vector3(0, boundsRef.current.center.y - controls.target.y, 0)
+    controls.target.add(shift)
+    camera.position.add(shift)
+    controls.update()
+  }, [level, camera, controls])
 
   // Beim Start und auf „Alles zeigen“ das ganze Projekt schräg von oben zeigen
   useEffect(() => {
@@ -38,7 +55,8 @@ export function AerialCamera({ bounds, fitRequest }: { bounds: SceneBounds; fitR
   return (
     <>
       <PerspectiveCamera makeDefault fov={45} near={NEAR} far={FAR} />
-      <OrbitControls makeDefault maxPolarAngle={Math.PI / 2 - 0.02} enableDamping />
+      {/* Über dem Gelände nicht unter den Rasen; bei Untergeschossen bis knapp unter die Waagerechte */}
+      <OrbitControls makeDefault maxPolarAngle={underground ? Math.PI / 2 + 0.3 : Math.PI / 2 - 0.02} enableDamping />
     </>
   )
 }

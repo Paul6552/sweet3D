@@ -116,6 +116,35 @@ export function settleRoofLevel(levels: Level[]): void {
   if (roof && top) roof.elevation = top.elevation + top.height + roof.floorThickness
 }
 
+/** Untergeschoss: Fußboden unter dem Gelände. */
+export function isUnderground(level: Pick<Level, 'elevation'> | null | undefined): boolean {
+  return (level?.elevation ?? 0) < 0
+}
+
+/**
+ * Neue Ebene unter der untersten (Untergeschoss): ihre Decke ist der Boden der Ebene darüber. Hat das
+ * Projekt noch keine Ebenen, entsteht zusätzlich die Ebene 0 für alles Bisherige. Die neue Ebene
+ * steht zuletzt, damit {@code addLevels} sie wählt.
+ */
+export function newBasementLevel(home: Home, name: (index: number) => string, baseName: string): { levels: Level[]; base: Level | null } {
+  const base: Level | null =
+    home.levels.length === 0
+      ? { id: newId('level'), name: baseName, elevation: 0, floorThickness: DEFAULT_FLOOR_THICKNESS, height: home.wallHeight, viewable: true }
+      : null
+  const storeys = base ? [base] : sortLevels(home.levels.filter((l) => !l.roof))
+  const bottom = storeys[0] ?? home.levels[0]
+  const height = bottom.height
+  const level: Level = {
+    id: newId('level'),
+    name: name(storeys.filter(isUnderground).length + 1),
+    elevation: bottom.elevation - bottom.floorThickness - height,
+    floorThickness: DEFAULT_FLOOR_THICKNESS,
+    height,
+    viewable: true,
+  }
+  return { levels: base ? [base, level] : [level], base }
+}
+
 /** Neues Dach-Niveau über dem obersten (mit Ebene 0, falls das Projekt noch keine Ebenen hat). */
 export function newRoofLevel(home: Home, name: string, baseName: string): { levels: Level[]; base: Level | null } {
   const { levels, base } = newLevels(home, () => baseName)

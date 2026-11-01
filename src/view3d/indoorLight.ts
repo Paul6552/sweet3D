@@ -6,6 +6,7 @@ import {
   HalfFloatType,
   LinearFilter,
   type Material,
+  MathUtils,
   MeshStandardMaterial,
   RGBAFormat,
   RGFormat,
@@ -324,9 +325,11 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
     const openHeight = Math.max(0, Math.min(piece.height, height - piece.elevation))
     const openArea = piece.width * openHeight * (piece.elevation >= WINDOW_SILL ? 1 : DOOR_FACTOR)
     if (openArea <= 0) continue
+    // Fenster von Untergeschossen sehen nach draußen nur mit dem Teil über dem Gelände etwas vom Himmel
+    const aboveGround = MathUtils.clamp(bottom + piece.elevation + openHeight, 0, openHeight) / openHeight
     for (const [side, other] of [sides, [...sides].reverse()]) {
       if (side.label <= OUTSIDE || side.label === other.label) continue
-      const otherSky = other.label > OUTSIDE ? (roofed[other.label] ? 0 : 1) : other.index >= 0 && covered[other.index] ? SHELTERED : 1
+      const otherSky = other.label > OUTSIDE ? (roofed[other.label] ? 0 : 1) : (other.index >= 0 && covered[other.index] ? SHELTERED : 1) * aboveGround
       const inward: Point = [normal[0] * -other.sign, normal[1] * -other.sign]
       openings.push({ center: [piece.x, piece.y], inward, area: openArea, z: piece.elevation + openHeight / 2, label: side.label, other: other.label, otherSky })
       if (other.label <= OUTSIDE || !roofed[other.label]) sunOpenings.push({ label: side.label, area: openArea * otherSky, outward: [-inward[0], -inward[1]] })

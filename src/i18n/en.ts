@@ -126,6 +126,8 @@ export const en: Resources = {
     defaultName: 'Level {{n}}',
     roofName: 'Roof',
     add: 'Add level',
+    addBelow: 'Add basement level',
+    basementName: 'Basement {{n}}',
     edit: 'Modify level',
     editHint: 'Double-click a tab to modify the level',
     name: 'Name',

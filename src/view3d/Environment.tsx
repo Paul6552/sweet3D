@@ -16,7 +16,9 @@ import {
   WebGLCubeRenderTarget,
 } from 'three'
 import { LightProbeGenerator } from 'three/examples/jsm/lights/LightProbeGenerator.js'
+import type { MultiPolygon } from 'polygon-clipping'
 import { setSkyIrradiance } from './eyeAdaptation'
+import { groundGeometry } from './groundHoles'
 import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
 
 /** Rasen aus dem Texturkatalog von Sweet Home 3D. */
@@ -111,8 +113,14 @@ export function Sky({ environmentSize, daylight }: { environmentSize: number; da
   return <primitive object={sky} />
 }
 
-/** Rasenfläche bis zum Horizont, knapp unter dem Fußboden der untersten Ebene; fest am Ursprung, damit das Muster nicht wandert. */
-export function Ground() {
+const NO_HOLES: MultiPolygon = []
+
+/**
+ * Rasenfläche bis zum Horizont knapp unter dem Gelände; fest am Ursprung, damit das Muster nicht
+ * wandert. Über Untergeschossen hat sie Löcher ({@link groundHoles}) und hält dann als Erdreich
+ * auch die Sonne von Kellerfenstern unter dem Gelände ab.
+ */
+export function Ground({ holes = NO_HOLES }: { holes?: MultiPolygon }) {
   const gl = useThree((s) => s.gl)
   const texture = useMemo<Texture>(() => {
     const t = new TextureLoader().load(GRASS)
@@ -124,9 +132,10 @@ export function Ground() {
     return t
   }, [gl])
   useEffect(() => () => texture.dispose(), [texture])
+  const geometry = useMemo(() => groundGeometry(GROUND_SIZE, holes), [holes])
+  useEffect(() => () => geometry.dispose(), [geometry])
   return (
-    <mesh rotation-x={-Math.PI / 2} position-y={-0.5} receiveShadow>
-      <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
+    <mesh rotation-x={-Math.PI / 2} position-y={-0.5} geometry={geometry} receiveShadow castShadow={holes.length > 0}>
       <meshStandardMaterial map={texture} color="#dfe6cf" roughness={1} onBeforeCompile={mixTiles} />
     </mesh>
   )

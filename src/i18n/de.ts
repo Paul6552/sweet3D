@@ -124,6 +124,8 @@ export const de = {
     defaultName: 'Ebene {{n}}',
     roofName: 'Dach',
     add: 'Ebene hinzufügen',
+    addBelow: 'Untergeschoss hinzufügen',
+    basementName: 'Untergeschoss {{n}}',
     edit: 'Ebene ändern',
     editHint: 'Doppelklick auf einen Reiter ändert die Ebene',
     name: 'Name',

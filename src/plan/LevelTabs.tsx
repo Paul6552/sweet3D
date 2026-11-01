@@ -15,12 +15,13 @@ import Tooltip from '@mui/material/Tooltip'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Level } from '../model/home'
-import { newLevels } from '../model/levels'
+import { newBasementLevel, newLevels } from '../model/levels'
 import { dispatch, executeCommand, useEditorStore } from '../store/editorStore'
 
 /**
  * Reiter der Ebenen über dem Plan wie in Sweet Home 3D: Klick wählt, Doppelklick ändert,
- * „+“ legt eine Ebene über der obersten an (unter dem Dach-Niveau). Ohne Ebenen zeigt sich nur das „+“.
+ * „+“ rechts legt eine Ebene über der obersten an (unter dem Dach-Niveau), „+“ links ein Untergeschoss
+ * unter der untersten. Ohne Ebenen zeigt sich nur das rechte „+“.
  */
 export function LevelTabs() {
   const { t } = useTranslation()
@@ -33,8 +34,21 @@ export function LevelTabs() {
     executeCommand({ type: 'addLevels', levels: created, assignExistingTo: base?.id ?? null })
   }
 
+  const addBelow = () => {
+    const home = useEditorStore.getState().home!
+    const { levels: created, base } = newBasementLevel(home, (n) => t('levels.basementName', { n }), t('levels.defaultName', { n: 0 }))
+    executeCommand({ type: 'addLevels', levels: created, assignExistingTo: base?.id ?? null })
+  }
+
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', borderBottom: 1, borderColor: 'divider', minHeight: 32 }}>
+      {levels.length > 0 && (
+        <Tooltip title={t('levels.addBelow')}>
+          <IconButton size="small" onClick={addBelow} aria-label={t('levels.addBelow')} sx={{ mx: 0.5 }}>
+            <Add fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      )}
       {levels.length > 0 && (
         <Tabs
           value={levels.some((l) => l.id === selected) ? selected : false}

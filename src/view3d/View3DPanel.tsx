@@ -25,6 +25,7 @@ import { homeBounds } from '../plan/hitTest'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { Ground, Sky } from './Environment'
+import { groundHoles } from './groundHoles'
 import { type Daylight, daylight } from './sky'
 import { sunDirection, sunPosition } from './sun'
 import { SunPopover } from './SunPopover'
@@ -48,8 +49,10 @@ function sceneBounds(home: Home, allLevels = false): SceneBounds {
   // Dächer ragen über die Ebenen hinaus
   const roofTops = home.roofs.filter((r) => visible.has(r.level)).map((r) => levelElevation(home, r.level) + rawRoofModel(home, r).ridge)
   const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)), ...roofTops)
-  const center = new Vector3((b.minX + b.maxX) / 2, top / 3, (b.minY + b.maxY) / 2)
-  const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top) / 2 + 100
+  // Untergeschosse reichen unter das Gelände
+  const bottom = Math.min(0, ...levels.map((l) => l?.elevation ?? 0))
+  const center = new Vector3((b.minX + b.maxX) / 2, bottom + (top - bottom) / 3, (b.minY + b.maxY) / 2)
+  const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top - bottom) / 2 + 100
   return { center, radius }
 }
 
@@ -234,6 +237,7 @@ export function View3DPanel() {
   )
   const bounds = useMemo(() => sceneBounds(geometry), [geometry])
   const shadowBounds = useMemo(() => sceneBounds(geometry, true), [geometry])
+  const holes = useMemo(() => groundHoles(geometry), [geometry])
   // Sonnenstand aus Kompass und Uhrzeit; auf etwa ein halbes Grad gerundet, damit das Umgebungslicht
   // beim Ziehen am Zeitregler nicht bei jedem Schritt neu berechnet werden muss
   const compass = home?.compass
@@ -319,7 +323,7 @@ export function View3DPanel() {
             <IndoorLighting home={geometry} light={light} bright={brightRooms} adapt={mode === 'aerial'} />
             <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
-            <Ground />
+            <Ground holes={holes} />
             <HomeScene
               home={home}
               selection={selection}

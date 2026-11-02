@@ -1,7 +1,7 @@
 import { applyPatches, enablePatches, produceWithPatches, type Patch } from 'immer'
 import { applyCommand } from '../model/commands'
 import type { Home } from '../model/home'
-import { useEditorStore, type EditorAction } from '../store/editorStore'
+import { isModelEdit, useEditorStore, type EditorAction } from '../store/editorStore'
 import type { PanelId } from '../editor/panelIds'
 import { channelName, leaderLockName, type SyncMessage } from './protocol'
 
@@ -28,6 +28,8 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
   const past: HistoryEntry[] = []
   const future: HistoryEntry[] = []
   const post = (message: SyncMessage) => channel.postMessage(message)
+  // Windows with pending photo renderings; while any exist, the model must not change
+  const renderLocks = new Set<string>()
 
   const applyAndBroadcast = (next: Home, patches: Patch[]) => {
     const canUndo = past.length > 0
@@ -39,6 +41,10 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
   const handle = (action: EditorAction) => {
     const state = useEditorStore.getState()
     const home = state.home!
+    if (renderLocks.size > 0 && isModelEdit(action)) {
+      useEditorStore.setState({ lockRejections: state.lockRejections + 1 })
+      return
+    }
     switch (action.type) {
       case 'command': {
         const [next, patches, inverse] = produceWithPatches(home, (draft) => applyCommand(draft, action.command))
@@ -93,6 +99,16 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
         useEditorStore.setState({ selection: action.ids })
         post({ type: 'selection', ids: action.ids })
         break
+      case 'renderLock': {
+        if (action.locked) renderLocks.add(action.owner)
+        else renderLocks.delete(action.owner)
+        const locked = renderLocks.size > 0
+        if (locked !== state.renderLocked) {
+          useEditorStore.setState({ renderLocked: locked })
+          post({ type: 'renderLocked', locked })
+        }
+        break
+      }
     }
   }
 
@@ -100,8 +116,8 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
     const message = event.data
     switch (message.type) {
       case 'hello': {
-        const { home: current, selection, canUndo, canRedo } = useEditorStore.getState()
-        post({ type: 'snapshot', to: message.windowId, home: current!, selection, canUndo, canRedo })
+        const { home: current, selection, canUndo, canRedo, renderLocked } = useEditorStore.getState()
+        post({ type: 'snapshot', to: message.windowId, home: current!, selection, canUndo, canRedo, renderLocked })
         callbacks.onPanelOpened(message.panel)
         break
       }
@@ -119,6 +135,7 @@ export function startLeader(projectId: string, leaderId: string, home: Home, cal
     selection: [],
     canUndo: false,
     canRedo: false,
+    renderLocked: false,
     connection: 'connected',
     dispatch: handle,
   })

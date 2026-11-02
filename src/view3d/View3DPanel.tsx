@@ -16,7 +16,7 @@ import { useTheme } from '@mui/material/styles'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ACESFilmicToneMapping, type Color, type Fog, Object3D, PCFShadowMap, Vector3 } from 'three'
 import type { CameraMode, Home } from '../model/home'
@@ -35,7 +35,8 @@ import { CompassHeading, CompassOverlay } from './CompassOverlay'
 import { useEditorContext } from '../editor/EditorContext'
 import { PanelToolbar } from '../editor/PanelFrame'
 import { HomeScene, SHADOW_LAYER } from './HomeScene'
-import { PhotoDialog, type SceneHandle } from './PhotoDialog'
+import type { SceneHandle } from './photoRender'
+import { openPhotoDialog, setSceneHandle } from './renderQueue'
 import { QUALITIES, QUALITY_PROFILES, type QualityProfile, useQualityStore } from './quality'
 import { ThumbnailRecorder } from './ThumbnailRecorder'
 import { useBrightRoomsStore } from './brightRooms'
@@ -186,11 +187,16 @@ class WebGLBoundary extends Component<{ message: string; children: ReactNode }, 
   }
 }
 
-/** Gibt Szene und Kamera für den Foto-Modus frei. */
-function SceneRegistry({ onChange }: { onChange: (handle: SceneHandle) => void }) {
+/** Offers scene, camera and renderer to the photo queue. */
+function SceneRegistry() {
   const scene = useThree((s) => s.scene)
   const camera = useThree((s) => s.camera)
-  useEffect(() => onChange({ scene, camera }), [onChange, scene, camera])
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    const handle: SceneHandle = { scene, camera, gl }
+    setSceneHandle(handle)
+    return () => setSceneHandle(null)
+  }, [scene, camera, gl])
   return null
 }
 
@@ -202,17 +208,12 @@ export function View3DPanel() {
   const home = useEditorStore((s) => s.home)
   const selection = useEditorStore((s) => s.selection)
   const [fitRequest, setFitRequest] = useState(0)
-  const [photoOpen, setPhotoOpen] = useState(false)
   const [qualityMenu, setQualityMenu] = useState<HTMLElement | null>(null)
   const quality = useQualityStore((s) => s.quality)
   const setQuality = useQualityStore((s) => s.setQuality)
   const profile = QUALITY_PROFILES[quality]
   const brightRooms = useBrightRoomsStore((s) => s.brightRooms)
-  const sceneHandle = useRef<SceneHandle | null>(null)
   const compassRose = useRef<HTMLDivElement>(null)
-  const registerScene = useCallback((handle: SceneHandle) => {
-    sceneHandle.current = handle
-  }, [])
   // Nur bei Änderungen der Geometrie neu berechnen, nicht bei jeder Kamerabewegung
   const walls = home?.walls
   const furniture = home?.furniture
@@ -302,7 +303,7 @@ export function View3DPanel() {
           </IconButton>
         </Tooltip>
         <Tooltip title={t('photo.title')}>
-          <IconButton size="small" onClick={() => setPhotoOpen(true)} aria-label={t('photo.title')}>
+          <IconButton size="small" onClick={() => openPhotoDialog(null)} aria-label={t('photo.title')}>
             <CameraAlt fontSize="small" />
           </IconButton>
         </Tooltip>
@@ -310,15 +311,12 @@ export function View3DPanel() {
           {t(mode === 'aerial' ? 'view3d.aerialHint' : 'view3d.observerHint')}
         </Typography>
       </PanelToolbar>
-      <PhotoDialog open={photoOpen} onClose={() => setPhotoOpen(false)} handle={() => sceneHandle.current} />
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative', '& canvas': { outline: 'none' } }}>
         {/* Logarithmische Tiefe: Böden knapp über dem Rasen flackern sonst schon aus mittlerer Entfernung */}
         <WebGLBoundary message={t('view3d.noWebGL')}>
           <Canvas
             shadows={{ enabled: true, type: PCFShadowMap }}
             dpr={profile.dpr}
-            // Während des Fotos nicht live rendern, damit die Grafikkarte ganz dem Pathtracer gehört
-            frameloop={photoOpen ? 'never' : 'always'}
             gl={{ antialias: true, logarithmicDepthBuffer: true, toneMapping: ACESFilmicToneMapping }}
             onPointerMissed={() => dispatch({ type: 'select', ids: [] })}
           >
@@ -340,7 +338,7 @@ export function View3DPanel() {
               lampShadows={profile.lampShadows}
             />
             <ThumbnailRecorder projectId={projectId} home={home} />
-            <SceneRegistry onChange={registerScene} />
+            <SceneRegistry />
             {home.compass.visible && <CompassHeading target={compassRose} northDirection={home.compass.northDirection} />}
             <Effects profile={profile} />
           </Canvas>

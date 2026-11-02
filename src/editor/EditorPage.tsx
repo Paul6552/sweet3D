@@ -37,6 +37,8 @@ import { useAutosave, type SaveState } from './useAutosave'
 import { useShortcuts } from './useShortcuts'
 import { MissingLibrariesNotice } from '../projects/MissingLibrariesNotice'
 import { SettingsMenu } from './SettingsMenu'
+import { RenderQueueMenu } from './RenderQueueMenu'
+import { useRenderLockNotice } from './useRenderLockNotice'
 
 const RESTORE_DELAY_MS = 1500
 
@@ -60,6 +62,7 @@ function SaveIndicator({ state }: { state: SaveState }) {
 export function EditorPage() {
   const { t, i18n } = useTranslation()
   const notify = useNotify()
+  useRenderLockNotice()
   const { projectId } = useParams({ from: '/editor/$projectId' })
   const leaderId = useMemo(() => leaderIdFor(projectId), [projectId])
   // Nur der Anfangsstand; danach gilt der Editor-Store, den useAutosave zurückschreibt.
@@ -74,8 +77,8 @@ export function EditorPage() {
   const detached = useLayoutStore((s) => s.detached)
   const leader = useLayoutStore((s) => s.leader)
   const setDetached = useLayoutStore((s) => s.setDetached)
-  const canUndo = useEditorStore((s) => s.canUndo)
-  const canRedo = useEditorStore((s) => s.canRedo)
+  const canUndo = useEditorStore((s) => s.canUndo && !s.renderLocked)
+  const canRedo = useEditorStore((s) => s.canRedo && !s.renderLocked)
   const saveState = useAutosave(project ? projectId : null)
   useShortcuts()
 
@@ -233,6 +236,7 @@ export function EditorPage() {
                 {t('editor.restoreWindows')} ({restorable.length})
               </Button>
             )}
+            <RenderQueueMenu />
             <SettingsMenu />
             <Tooltip title={t('editor.github')}>
               <IconButton

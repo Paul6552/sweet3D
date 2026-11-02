@@ -10,9 +10,10 @@ import type { PanelId } from '../editor/panelIds'
 export type SyncMessage =
   | { type: 'hello'; windowId: string; panel: PanelId }
   | { type: 'bye'; windowId: string; panel: PanelId }
-  | { type: 'snapshot'; to: string; home: Home; selection: string[]; canUndo: boolean; canRedo: boolean }
+  | { type: 'snapshot'; to: string; home: Home; selection: string[]; canUndo: boolean; canRedo: boolean; renderLocked: boolean }
   | { type: 'patches'; patches: Patch[]; canUndo: boolean; canRedo: boolean }
   | { type: 'selection'; ids: string[] }
+  | { type: 'renderLocked'; locked: boolean }
   | { type: 'action'; action: EditorAction }
   | { type: 'dock'; panel: PanelId }
   | { type: 'leader-ready' }

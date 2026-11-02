@@ -22,6 +22,8 @@ import { PanelFrame } from './PanelFrame'
 import { isPanelId } from './panelIds'
 import { PANELS } from './panels'
 import { useShortcuts } from './useShortcuts'
+import { RenderQueueMenu } from './RenderQueueMenu'
+import { useRenderLockNotice } from './useRenderLockNotice'
 
 /**
  * Ein herausgelöstes Panel in einem eigenen Browserfenster, z. B. die 3D-Ansicht auf einem
@@ -33,11 +35,12 @@ export function PanelWindowPage() {
   const { leader: leaderId } = useSearch({ from: '/editor/$projectId/panel/$panelId' })
   const connection = useEditorStore((s) => s.connection)
   const hasHome = useEditorStore((s) => s.home !== null)
-  const canUndo = useEditorStore((s) => s.canUndo)
-  const canRedo = useEditorStore((s) => s.canRedo)
+  const canUndo = useEditorStore((s) => s.canUndo && !s.renderLocked)
+  const canRedo = useEditorStore((s) => s.canRedo && !s.renderLocked)
   const [fullscreen, setFullscreen] = useState(false)
   const panel = isPanelId(panelId) ? panelId : null
   useShortcuts()
+  useRenderLockNotice()
 
   useEffect(() => {
     if (!panel) return
@@ -70,6 +73,7 @@ export function PanelWindowPage() {
 
   const actions = (
     <>
+      {panel === 'view3d' && <RenderQueueMenu />}
       <Tooltip title={t('editor.undo')}>
         <span>
           <IconButton size="small" disabled={!canUndo} onClick={() => dispatch({ type: 'undo' })} aria-label={t('editor.undo')}>

@@ -293,11 +293,37 @@ export const de = {
     progress: 'Durchgang {{samples}} von {{total}}',
     error: 'Das Foto konnte nicht berechnet werden. Die Grafikkarte war überlastet oder unterstützt kein WebGL2 – kleinere Auflösung versuchen.',
     render: 'Rendern',
+    enqueue: 'Zur Warteliste hinzufügen',
+    numbered: 'Foto {{number}}',
     stop: 'Anhalten',
     download: 'Als PNG speichern',
     close: 'Schließen',
+    minimize: 'Minimieren',
+    background:
+      'Du musst nicht warten: Das Rendering läuft im Hintergrund weiter, auch wenn du dieses Fenster minimierst. Du kannst inzwischen die Ansicht ändern und weitere Renderings hinzufügen. Den Fortschritt und die fertigen Bilder findest du oben rechts beim Symbol „Renderings“.',
     brightRooms:
       '„Räume immer hell (zum Einrichten)“ ist eingeschaltet: Die Räume werden von oben ausgeleuchtet, als hätten sie keine Decke. Für echtes Licht nur durch Fenster und Türen die Option beim Sonnenstand der 3D-Ansicht ausschalten.',
+  },
+  renderQueue: {
+    title: 'Renderings',
+    empty: 'Noch keine Renderings. Ansicht in der 3D-Ansicht einstellen und über die Kamera oder „Neues Rendering“ hinzufügen – mehrere werden nacheinander berechnet.',
+    new: 'Neues Rendering',
+    noScene: 'Für ein neues Rendering muss die 3D-Ansicht in diesem Fenster geöffnet sein.',
+    waiting_zero: 'Wartet – kommt als Nächstes',
+    waiting_one: 'Wartet – {{count}} Rendering davor',
+    waiting_other: 'Wartet – {{count}} Renderings davor',
+    done: 'Fertig',
+    cancel: 'Abbrechen',
+    remove: 'Entfernen',
+    clearFinished: 'Fertige entfernen',
+    locked: 'Das Modell ist gesperrt, solange Renderings offen sind. Kamera und Sonnenstand lassen sich weiter ändern.',
+    states: {
+      queued: 'Wartet',
+      preparing: 'Wird vorbereitet',
+      rendering: 'Wird berechnet',
+      done: 'Fertig',
+      error: 'Fehler',
+    },
   },
 }
 

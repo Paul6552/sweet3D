@@ -50,6 +50,7 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
           selection: message.selection,
           canUndo: message.canUndo,
           canRedo: message.canRedo,
+          renderLocked: message.renderLocked,
           connection: 'connected',
         })
         break
@@ -66,6 +67,9 @@ export function startFollower(projectId: string, leaderId: string, panel: PanelI
       }
       case 'selection':
         useEditorStore.setState({ selection: message.ids })
+        break
+      case 'renderLocked':
+        useEditorStore.setState({ renderLocked: message.locked })
         break
       case 'leader-ready':
         reconnect()

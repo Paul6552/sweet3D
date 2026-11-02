@@ -9,6 +9,8 @@ export type DialogRequest =
   | { kind: 'compass' }
   /** Ground of the 3D view. */
   | { kind: 'environment' }
+  /** Background image of the plan, also usable as 3D ground. */
+  | { kind: 'backgroundImage' }
 
 interface DialogState {
   request: DialogRequest | null
@@ -24,6 +26,8 @@ export const useDialogStore = create<DialogState>((set) => ({
 }))
 
 export const openEnvironmentDialog = () => useDialogStore.getState().open({ kind: 'environment' })
+
+export const openBackgroundImageDialog = () => useDialogStore.getState().open({ kind: 'backgroundImage' })
 
 export const openCompassDialog = () => useDialogStore.getState().open({ kind: 'compass' })
 

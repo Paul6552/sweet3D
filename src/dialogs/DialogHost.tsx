@@ -1,3 +1,4 @@
+import { BackgroundImageDialog } from './BackgroundImageDialog'
 import { CompassDialog } from './CompassDialog'
 import { EnvironmentDialog } from './EnvironmentDialog'
 import { ItemDialog } from './ItemDialog'
@@ -18,5 +19,7 @@ export function DialogHost() {
       return <CompassDialog onClose={close} />
     case 'environment':
       return <EnvironmentDialog onClose={close} />
+    case 'backgroundImage':
+      return <BackgroundImageDialog onClose={close} />
   }
 }

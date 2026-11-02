@@ -1,5 +1,5 @@
 import type { MultiPolygon, Polygon } from 'polygon-clipping'
-import { BufferAttribute, type BufferGeometry, PlaneGeometry, Shape, ShapeGeometry, Vector2 } from 'three'
+import { BufferAttribute, type BufferGeometry, Path, PlaneGeometry, Shape, ShapeGeometry, Vector2 } from 'three'
 import { clipping } from '../model/clipping'
 import { wallPolygon, type Point } from '../model/geometry'
 import type { Home } from '../model/home'
@@ -60,4 +60,18 @@ export function groundGeometry(size: number, holes: MultiPolygon): BufferGeometr
   }
   geometry.setAttribute('uv', new BufferAttribute(uv, 2))
   return geometry
+}
+
+/**
+ * Flat geometry of plan polygons (outer ring plus holes), laid out like {@link groundGeometry}
+ * (local y = −plan y, rotated −90° around x it lies flat). Without texture coordinates.
+ */
+export function polygonsGeometry(polygons: MultiPolygon): ShapeGeometry {
+  const toVectors = (ring: Point[]) => ring.slice(0, -1).map(([x, y]) => new Vector2(x, -y))
+  const shapes = polygons.map(([outer, ...inner]) => {
+    const shape = new Shape(toVectors(outer as Point[]))
+    shape.holes = inner.map((ring) => new Path(toVectors(ring as Point[])))
+    return shape
+  })
+  return new ShapeGeometry(shapes)
 }

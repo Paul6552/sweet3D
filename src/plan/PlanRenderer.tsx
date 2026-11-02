@@ -2,7 +2,7 @@ import { useTheme } from '@mui/material/styles'
 import { memo, useCallback, useMemo } from 'react'
 import { Arrow, Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import { argbToCss } from '../model/colors'
-import type { Compass, DimensionLine, Home, HomePiece, Label as HomeLabel, ObserverCamera, Roof, Wall } from '../model/home'
+import { backgroundImageTransform, type BackgroundImage, type Compass, type DimensionLine, type Home, type HomePiece, type Label as HomeLabel, type ObserverCamera, type Roof, type Wall } from '../model/home'
 import { dimensionLength, dimensionOffsetPoints, labelCorners, pitchedSize, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { edgeProfile, GABLE, roofModels, type RoofModel } from '../model/roofs'
 import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
@@ -39,6 +39,26 @@ interface PlanRendererProps {
 }
 
 const ROOF_INK = '#b0642a'
+
+/** Background image under the plan (e.g. an aerial photo), semi-transparent like in Sweet Home 3D. */
+const BackgroundImageShape = memo(function BackgroundImageShape({ backgroundImage }: { backgroundImage: BackgroundImage }) {
+  const url = useResolvedRef(backgroundImage.image)
+  const image = useImage(url)
+  if (!image) return null
+  const { scale, rotation, offset } = backgroundImageTransform(backgroundImage)
+  return (
+    <Image
+      image={image}
+      x={offset[0]}
+      y={offset[1]}
+      scaleX={scale}
+      scaleY={scale}
+      rotation={(rotation * 180) / Math.PI}
+      opacity={0.7}
+      listening={false}
+    />
+  )
+})
 const ROOF_INK_DARK = '#e3a05f'
 const degreesText = (radians: number) => `${Math.round((radians * 180) / Math.PI)}°`
 
@@ -477,8 +497,11 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
     [below, home.rooms, home.walls, home.roofs, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink, models, roofInk, roofsBelow],
   )
 
+  const { backgroundImage } = home.environment
   return (
     <>
+      {backgroundImage?.visible && <BackgroundImageShape backgroundImage={backgroundImage} />}
+
       <Grid
         view={view}
         width={width}

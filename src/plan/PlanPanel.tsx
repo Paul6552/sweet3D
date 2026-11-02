@@ -4,6 +4,7 @@ import FitScreen from '@mui/icons-material/FitScreen'
 import FormatShapes from '@mui/icons-material/FormatShapes'
 import GridGoldenratio from '@mui/icons-material/GridGoldenratio'
 import HighlightAlt from '@mui/icons-material/HighlightAlt'
+import SatelliteAltOutlined from '@mui/icons-material/SatelliteAltOutlined'
 import PanToolOutlined from '@mui/icons-material/PanToolOutlined'
 import Polyline from '@mui/icons-material/Polyline'
 import Roofing from '@mui/icons-material/Roofing'
@@ -21,7 +22,7 @@ import Typography from '@mui/material/Typography'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Point } from '../model/geometry'
-import { isDialogOpen, openItemDialog } from '../dialogs/dialogStore'
+import { isDialogOpen, openBackgroundImageDialog, openItemDialog } from '../dialogs/dialogStore'
 import { roofLevel } from '../model/levels'
 import { roofTool } from '../model/roofs'
 import { useNotify } from '../editor/useNotify'
@@ -144,6 +145,11 @@ export function PlanPanel() {
           >
             <GridGoldenratio fontSize="small" />
           </ToggleButton>
+        </Tooltip>
+        <Tooltip title={t('backgroundImage.open')}>
+          <IconButton size="small" onClick={openBackgroundImageDialog} aria-label={t('backgroundImage.open')}>
+            <SatelliteAltOutlined fontSize="small" />
+          </IconButton>
         </Tooltip>
       </PanelToolbar>
       <LevelTabs />

@@ -21,7 +21,7 @@ import {
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
-import { LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_LEVEL_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
+import { BACKGROUND_ROTATION_PROPERTY, LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_LEVEL_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -322,6 +322,29 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
     const groundColor = parseArgb(environment.getAttribute('groundColor'))
     if (groundTexture) home.environment.ground = { color: null, texture: groundTexture }
     else if (groundColor !== null && (groundColor & 0xffffff) !== SH3D_DEFAULT_GROUND) home.environment.ground = { color: groundColor, texture: null }
+  }
+  // Off by default in Sweet Home 3D, so scanned floor plans do not end up on the lawn
+  home.environment.backgroundImageOnGround = environment?.getAttribute('backgroundImageVisibleOnGround3D') === 'true'
+
+  // Background image of the home, otherwise the one of the first level that has one (Sweet3D has one per project)
+  const backgroundElement =
+    [...root.children].find((e) => e.nodeName === 'backgroundImage') ??
+    levelElements.map((level) => [...level.children].find((e) => e.nodeName === 'backgroundImage')).find((e) => e !== undefined)
+  const backgroundImage = backgroundElement && content(backgroundElement.getAttribute('image'))
+  if (backgroundElement && backgroundImage) {
+    const rotation = Number(property(root, BACKGROUND_ROTATION_PROPERTY) ?? 0)
+    home.environment.backgroundImage = {
+      image: backgroundImage,
+      scaleDistance: num(backgroundElement, 'scaleDistance') ?? 100,
+      scaleDistanceXStart: num(backgroundElement, 'scaleDistanceXStart') ?? 0,
+      scaleDistanceYStart: num(backgroundElement, 'scaleDistanceYStart') ?? 0,
+      scaleDistanceXEnd: num(backgroundElement, 'scaleDistanceXEnd') ?? 100,
+      scaleDistanceYEnd: num(backgroundElement, 'scaleDistanceYEnd') ?? 0,
+      xOrigin: num(backgroundElement, 'xOrigin') ?? 0,
+      yOrigin: num(backgroundElement, 'yOrigin') ?? 0,
+      visible: backgroundElement.getAttribute('visible') !== 'false',
+      ...(Number.isFinite(rotation) && rotation !== 0 && { rotation }),
+    }
   }
 
   const compass = [...root.children].find((e) => e.nodeName === 'compass')

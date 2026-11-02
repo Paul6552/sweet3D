@@ -1,7 +1,9 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  BufferAttribute,
   CircleGeometry,
+  ClampToEdgeWrapping,
   CubeCamera,
   HalfFloatType,
   Mesh,
@@ -21,8 +23,9 @@ import { LightProbeGenerator } from 'three/examples/jsm/lights/LightProbeGenerat
 import type { MultiPolygon } from 'polygon-clipping'
 import { setSkyIrradiance } from './eyeAdaptation'
 import { argbToCss } from '../model/colors'
-import type { Surface } from '../model/home'
-import { groundGeometry } from './groundHoles'
+import { clipping } from '../model/clipping'
+import { backgroundImageTransform, imageToPlan, planToImage, type BackgroundImage, type Surface } from '../model/home'
+import { groundGeometry, polygonsGeometry } from './groundHoles'
 import { type GroundUniforms, patchGroundShader } from './groundShader'
 import { loadImage } from './materials'
 import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
@@ -191,4 +194,74 @@ export function Ground({ holes = NO_HOLES, ground = DEFAULT_GROUND }: { holes?: 
   const geometry = useMemo(() => groundGeometry(GROUND_SIZE, holes), [holes])
   useEffect(() => () => geometry.dispose(), [geometry])
   return <mesh rotation-x={-Math.PI / 2} position-y={-0.5} geometry={geometry} material={material} receiveShadow castShadow={holes.length > 0} />
+}
+
+/**
+ * Background image of the plan (e.g. an aerial photo) on the ground of the 3D view, like
+ * "backgroundImageVisibleOnGround3D" in Sweet Home 3D: the image rectangle lies just above the
+ * ground, which continues around it, with the same holes above basements. A plain textured
+ * material with real texture coordinates, so the path tracer of the photo mode renders it as is.
+ */
+export function AerialGround({ backgroundImage, holes = NO_HOLES }: { backgroundImage: BackgroundImage; holes?: MultiPolygon }) {
+  const gl = useThree((s) => s.gl)
+  const [loaded, setLoaded] = useState<{ ref: string; image: HTMLImageElement } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const ref = backgroundImage.image
+    void loadImage(ref)
+      .then((image) => !cancelled && image && setLoaded({ ref, image }))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [backgroundImage.image])
+  const image = loaded?.ref === backgroundImage.image ? loaded.image : null
+
+  const material = useMemo(() => {
+    if (!image) return null
+    const map = new Texture(image)
+    map.colorSpace = SRGBColorSpace
+    map.wrapS = map.wrapT = ClampToEdgeWrapping
+    map.anisotropy = gl.capabilities.getMaxAnisotropy()
+    map.needsUpdate = true
+    // Pulled towards the camera so it never flickers with the ground below
+    return new MeshStandardMaterial({ map, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+  }, [image, gl])
+  useEffect(
+    () => () => {
+      material?.map?.dispose()
+      material?.dispose()
+    },
+    [material],
+  )
+
+  const geometry = useMemo(() => {
+    if (!image) return null
+    const width = image.naturalWidth
+    const height = image.naturalHeight
+    const transform = backgroundImageTransform(backgroundImage)
+    const corners = ([[0, 0], [width, 0], [width, height], [0, height], [0, 0]] as [number, number][]).map((p) => imageToPlan(transform, p))
+    let area: MultiPolygon = [[corners]]
+    if (holes.length > 0) {
+      try {
+        area = clipping.difference(area, holes)
+      } catch {
+        // Without holes rather than without the image
+      }
+    }
+    const created = polygonsGeometry(area)
+    const position = created.getAttribute('position')
+    const uv = new Float32Array(position.count * 2)
+    for (let i = 0; i < position.count; i++) {
+      const [x, y] = planToImage(transform, [position.getX(i), -position.getY(i)])
+      uv[2 * i] = x / width
+      uv[2 * i + 1] = 1 - y / height
+    }
+    created.setAttribute('uv', new BufferAttribute(uv, 2))
+    return created
+  }, [image, backgroundImage, holes])
+  useEffect(() => () => geometry?.dispose(), [geometry])
+
+  if (!geometry || !material) return null
+  return <mesh rotation-x={-Math.PI / 2} position-y={-0.3} geometry={geometry} material={material} receiveShadow />
 }

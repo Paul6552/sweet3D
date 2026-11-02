@@ -343,13 +343,83 @@ export function defaultTime(): number {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12).getTime()
 }
 
-/** Ground of the 3D view: default (realistic lawn), a color or a texture. */
+/**
+ * Image under the plan, e.g. a north-up aerial screenshot, like BackgroundImage in Sweet Home 3D:
+ * the segment from (scaleDistanceXStart, …YStart) to (…XEnd, …YEnd) in image pixels is
+ * {@code scaleDistance} cm long, and the top left corner of the image lies at plan
+ * (−xOrigin, −yOrigin). {@code rotation} (radians, clockwise around that corner) is a Sweet3D
+ * extension; Sweet Home 3D does not rotate background images.
+ */
+export interface BackgroundImage {
+  /** URL or „content:…“ reference. */
+  image: string
+  scaleDistance: number
+  scaleDistanceXStart: number
+  scaleDistanceYStart: number
+  scaleDistanceXEnd: number
+  scaleDistanceYEnd: number
+  xOrigin: number
+  yOrigin: number
+  /** Shown in the plan. */
+  visible: boolean
+  rotation?: number
+}
+
+/** Plan position of image pixels: plan = offset + R(rotation) · (pixel · scale). */
+export interface BackgroundImageTransform {
+  /** cm per image pixel. */
+  scale: number
+  rotation: number
+  /** Plan position of the top left corner of the image. */
+  offset: [number, number]
+}
+
+export function backgroundImageTransform(image: BackgroundImage): BackgroundImageTransform {
+  const pixels = Math.hypot(image.scaleDistanceXEnd - image.scaleDistanceXStart, image.scaleDistanceYEnd - image.scaleDistanceYStart)
+  const scale = pixels > 0 && image.scaleDistance > 0 ? image.scaleDistance / pixels : 1
+  return { scale, rotation: image.rotation ?? 0, offset: [-image.xOrigin, -image.yOrigin] }
+}
+
+/** Plan position of an image pixel. */
+export function imageToPlan(transform: BackgroundImageTransform, [x, y]: [number, number]): [number, number] {
+  const { scale, rotation, offset } = transform
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  return [offset[0] + (x * cos - y * sin) * scale, offset[1] + (x * sin + y * cos) * scale]
+}
+
+/** Image pixel at a plan position. */
+export function planToImage(transform: BackgroundImageTransform, [x, y]: [number, number]): [number, number] {
+  const { scale, rotation, offset } = transform
+  const dx = (x - offset[0]) / scale
+  const dy = (y - offset[1]) / scale
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  return [dx * cos + dy * sin, -dx * sin + dy * cos]
+}
+
+/**
+ * Origin for a calibrated image: {@code pixel} of the image lies at plan point {@code at} after
+ * scaling with {@code scale} and rotating by {@code rotation}.
+ */
+export function backgroundImageOrigin(pixel: [number, number], at: [number, number], scale: number, rotation: number): { xOrigin: number; yOrigin: number } {
+  const [x, y] = imageToPlan({ scale, rotation, offset: [0, 0] }, pixel)
+  return { xOrigin: x - at[0], yOrigin: y - at[1] }
+}
+
+/**
+ * Ground of the 3D view: default (realistic lawn), a color or a texture; optionally the background
+ * image of the plan on the ground (e.g. an aerial photo), like HomeEnvironment in Sweet Home 3D.
+ */
 export interface HomeEnvironment {
   ground: Surface
+  backgroundImage: BackgroundImage | null
+  /** Shows the background image on the ground of the 3D view, around it the ground continues. */
+  backgroundImageOnGround: boolean
 }
 
 export function defaultEnvironment(): HomeEnvironment {
-  return { ground: { color: null, texture: null } }
+  return { ground: { color: null, texture: null }, backgroundImage: null, backgroundImageOnGround: true }
 }
 
 export interface Home {

@@ -26,7 +26,7 @@ import { homeBounds } from '../plan/hitTest'
 import { openEnvironmentDialog } from '../dialogs/dialogStore'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
-import { Ground, Sky } from './Environment'
+import { AerialGround, Ground, Sky } from './Environment'
 import { groundHoles } from './groundHoles'
 import { type Daylight, daylight } from './sky'
 import { sunDirection, sunPosition } from './sun'
@@ -329,6 +329,9 @@ export function View3DPanel() {
             <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
             <Ground holes={holes} ground={home.environment.ground} />
+            {home.environment.backgroundImage && home.environment.backgroundImageOnGround && (
+              <AerialGround backgroundImage={home.environment.backgroundImage} holes={holes} />
+            )}
             <HomeScene
               home={home}
               selection={selection}

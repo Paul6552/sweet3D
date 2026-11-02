@@ -26,6 +26,8 @@ export const TO_ROOF_PROPERTY = 'sweet3d.toRoof'
 export const ROOF_ID_PROPERTY = 'sweet3d.roofId'
 /** Dach-Niveau des Dach-Werkzeugs. */
 export const ROOF_LEVEL_PROPERTY = 'sweet3d.roofLevel'
+/** Rotation of the background image in radians; Sweet Home 3D shows it unrotated. */
+export const BACKGROUND_ROTATION_PROPERTY = 'sweet3d.backgroundImageRotation'
 
 export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
 
@@ -210,19 +212,41 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
   const { observer, time } = home.camera
   const { compass } = home
   // Default lawn: no environment element, Sweet Home 3D then shows its own default ground
-  const { ground } = home.environment
+  const { ground, backgroundImage } = home.environment
   const groundTexture = await texture(ground.texture, 'groundTexture', '    ')
-  const environment = groundTexture.length > 0 || ground.color != null
-    ? [withChildren(openTag('environment', { groundColor: color(ground) }), 'environment', groundTexture)]
+  const backgroundEntry = backgroundImage ? await content(backgroundImage.image).catch(() => null) : null
+  const imageOnGround = backgroundEntry !== null && home.environment.backgroundImageOnGround
+  const environment = groundTexture.length > 0 || ground.color != null || imageOnGround
+    ? [withChildren(openTag('environment', { groundColor: color(ground), backgroundImageVisibleOnGround3D: imageOnGround || null }), 'environment', groundTexture)]
     : []
+  const background =
+    backgroundImage && backgroundEntry
+      ? [
+          `  ${element('backgroundImage', {
+            image: backgroundEntry,
+            scaleDistance: backgroundImage.scaleDistance,
+            scaleDistanceXStart: backgroundImage.scaleDistanceXStart,
+            scaleDistanceYStart: backgroundImage.scaleDistanceYStart,
+            scaleDistanceXEnd: backgroundImage.scaleDistanceXEnd,
+            scaleDistanceYEnd: backgroundImage.scaleDistanceYEnd,
+            xOrigin: backgroundImage.xOrigin,
+            yOrigin: backgroundImage.yOrigin,
+            visible: backgroundImage.visible ? null : false,
+          })}`,
+        ]
+      : []
+  const backgroundRotation = backgroundEntry && backgroundImage?.rotation ? backgroundImage.rotation : null
   const xml = [
     "<?xml version='1.0'?>",
     `<home version='7400' camera='${home.camera.mode === 'observer' ? 'observerCamera' : 'topCamera'}'${home.selectedLevel ? ` selectedLevel='${escapeXml(home.selectedLevel)}'` : ''} wallHeight='${home.wallHeight}'>`,
     // Eigenschaften stehen laut DTD vor allen anderen Kindern
     ...(libraries.length > 0 ? [`  ${element('property', { name: LIBRARIES_PROPERTY, value: JSON.stringify(libraries) })}`] : []),
     ...(Object.keys(textureExtras).length > 0 ? [`  ${element('property', { name: TEXTURE_EXTRAS_PROPERTY, value: JSON.stringify(textureExtras) })}`] : []),
+    ...(backgroundRotation !== null ? [`  ${element('property', { name: BACKGROUND_ROTATION_PROPERTY, value: String(backgroundRotation) })}`] : []),
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
     ...environment,
+    // DTD order: environment, backgroundImage, print, compass
+    ...background,
     `  ${element('compass', {
       x: compass.x,
       y: compass.y,

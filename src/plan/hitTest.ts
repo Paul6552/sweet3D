@@ -1,8 +1,8 @@
-import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Roof, Wall } from '../model/home'
+import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Roof, TerrainArea, Wall } from '../model/home'
 import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
 import { rawRoofModel } from '../model/roofs'
 
-export type ItemKind = 'piece' | 'wall' | 'room' | 'roof' | 'dimensionLine' | 'label'
+export type ItemKind = 'piece' | 'wall' | 'room' | 'roof' | 'dimensionLine' | 'label' | 'terrain'
 
 export interface Hit {
   kind: ItemKind
@@ -21,6 +21,10 @@ export type Handle =
   | { kind: 'roofPoint'; roof: Roof; index: number }
   /** Mitte der Kante {@code index}: Ziehen fügt dort eine Ecke ein. */
   | { kind: 'roofMid'; roof: Roof; index: number }
+  /** Corner {@code index} of a terrain area. */
+  | { kind: 'terrainPoint'; area: TerrainArea; index: number }
+  /** Middle of edge {@code index} of a terrain area: dragging inserts a corner there. */
+  | { kind: 'terrainMid'; area: TerrainArea; index: number }
 
 /**
  * Trifft der Punkt das Dach? Nur am Überstand (zwischen Wandlinie und Traufe) und an First, Graten
@@ -63,7 +67,25 @@ export function hitItem(home: Home, point: Point, tolerance = 0): Hit | null {
   for (let i = home.rooms.length - 1; i >= 0; i--) {
     if (pointInPolygon(point, home.rooms[i].points)) return { kind: 'room', id: home.rooms[i].id }
   }
+  // Terrain areas usually surround the house: only their outline is hit, so a click beside the
+  // house still starts a selection rectangle
+  for (let i = home.terrain.length - 1; i >= 0; i--) {
+    const outline = home.terrain[i].points
+    if (outline.some((a, j) => distanceToSegment(point, a, outline[(j + 1) % outline.length]) <= Math.max(tolerance, 3))) return { kind: 'terrain', id: home.terrain[i].id }
+  }
   return null
+}
+
+/** Corner and edge middle handles of a polygon, like those of roofs. */
+function polygonHandles<T>(points: Point[], corner: (index: number) => T, middle: (index: number) => T): { handle: T; point: Point }[] {
+  const n = points.length
+  return [
+    ...points.map((point, index) => ({ handle: corner(index), point })),
+    ...points.map((a, index) => {
+      const b = points[(index + 1) % n]
+      return { handle: middle(index), point: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Point }
+    }),
+  ]
 }
 
 /** Griffpunkte des einzeln ausgewählten Objekts. */
@@ -88,14 +110,11 @@ export function handlePoints(home: Home, selection: string[]): { handle: Handle;
   }
   const roof = home.roofs.find((r) => r.id === selection[0])
   if (roof) {
-    const n = roof.points.length
-    return [
-      ...roof.points.map((point, index) => ({ handle: { kind: 'roofPoint', roof, index } as Handle, point })),
-      ...roof.points.map((a, index) => {
-        const b = roof.points[(index + 1) % n]
-        return { handle: { kind: 'roofMid', roof, index } as Handle, point: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Point }
-      }),
-    ]
+    return polygonHandles<Handle>(roof.points, (index) => ({ kind: 'roofPoint', roof, index }), (index) => ({ kind: 'roofMid', roof, index }))
+  }
+  const area = home.terrain.find((a) => a.id === selection[0])
+  if (area) {
+    return polygonHandles<Handle>(area.points, (index) => ({ kind: 'terrainPoint', area, index }), (index) => ({ kind: 'terrainMid', area, index }))
   }
   const wall = home.walls.find((w) => w.id === selection[0])
   if (wall) {
@@ -125,6 +144,7 @@ export function itemsInRect(home: Home, a: Point, b: Point): string[] {
     ...home.roofs.filter((r) => inside(r.points)).map((r) => r.id),
     ...home.dimensionLines.filter((d) => inside(dimensionOffsetPoints(d))).map((d) => d.id),
     ...home.labels.filter((l) => inside([[l.x, l.y]])).map((l) => l.id),
+    ...home.terrain.filter((a) => inside(a.points)).map((a) => a.id),
   ]
 }
 

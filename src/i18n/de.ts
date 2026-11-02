@@ -138,7 +138,7 @@ export const de = {
   },
   plan: {
     noHouse: 'Kein Haus gefunden: Das oberste Geschoss braucht Räume oder ringsum geschlossene Wände',
-    modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen', roof: 'Dach anlegen', dormer: 'Gaube anlegen', dimension: 'Maßlinien zeichnen', label: 'Texte einfügen' },
+    modes: { select: 'Auswählen', pan: 'Ansicht verschieben', wall: 'Wände zeichnen', room: 'Räume zeichnen', terrain: 'Gelände zeichnen', roof: 'Dach anlegen', dormer: 'Gaube anlegen', dimension: 'Maßlinien zeichnen', label: 'Texte einfügen' },
     modify: 'Auswahl ändern (Doppelklick)',
     zoomIn: 'Vergrößern',
     zoomOut: 'Verkleinern',
@@ -152,6 +152,8 @@ export const de = {
       wallNext: 'Klicken setzt die nächste Ecke · Doppelklick oder Esc beendet · Alt ohne Magnetismus',
       roomStart: 'Klicken setzt Eckpunkte · Doppelklick in einen umschlossenen Bereich legt den Raum automatisch an',
       roomNext: 'Klicken setzt den nächsten Punkt · Doppelklick oder Enter beendet · Esc bricht ab',
+      terrainStart: 'Klicken setzt Eckpunkte einer Geländefläche auf Höhe dieser Ebene, z. B. Rasen hinter einem Haus am Hang',
+      terrainNext: 'Klicken setzt den nächsten Punkt · Doppelklick oder Enter beendet · Esc bricht ab',
       dormer: 'Rechteck auf einer Dachfläche ziehen legt eine Schleppgaube an · mit Umschalt eine Satteldachgaube',
       dimensionStart: 'Klicken setzt den Anfang der Maßlinie · rastet an Ecken ein',
       dimensionEnd: 'Klicken setzt das Ende der Maßlinie · Esc bricht ab',
@@ -168,6 +170,7 @@ export const de = {
       roofs: 'Dächer ändern',
       labels: 'Texte ändern',
       dimensionLines: 'Maßlinien ändern',
+      terrain: 'Gelände ändern',
       mixed: 'Auswahl ändern',
       newLabel: 'Text einfügen',
     },
@@ -196,6 +199,17 @@ export const de = {
       ceiling: 'Decke',
       textColor: 'Textfarbe',
     },
+  },
+  terrain: {
+    elevation: 'Höhe',
+    followLevel: 'Höhe folgt Ebene',
+    noLevel: 'Eigene Höhe',
+    edge: 'Rand',
+    edges: { wall: 'Senkrecht (Fels, Stützmauer)', slope: 'Böschung' },
+    slopeAngle: 'Neigung der Böschung',
+    hint: 'Die Höhe gilt wie bei Ebenen ab Ebene 0. Wo ein Geschoss tiefer liegt als das Gelände, schneidet das Haus die Fläche aus, seine Wände halten dann das Erdreich.',
+    surface: 'Oberfläche (Standard: Boden der Umgebung)',
+    edgeSurface: 'Senkrechter Rand (Standard: Fels)',
   },
   roof: {
     shapes: {

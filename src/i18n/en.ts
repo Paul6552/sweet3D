@@ -140,7 +140,7 @@ export const en: Resources = {
   },
   plan: {
     noHouse: 'No house found: the top storey needs rooms or walls that enclose an area',
-    modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms', roof: 'Create roof', dormer: 'Create dormer', dimension: 'Create dimensions', label: 'Add text' },
+    modes: { select: 'Select', pan: 'Pan view', wall: 'Create walls', room: 'Create rooms', terrain: 'Create terrain', roof: 'Create roof', dormer: 'Create dormer', dimension: 'Create dimensions', label: 'Add text' },
     modify: 'Modify selection (double-click)',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
@@ -154,6 +154,8 @@ export const en: Resources = {
       wallNext: 'Click sets the next corner · Double-click or Esc finishes · Alt disables magnetism',
       roomStart: 'Click to set corners · Double-click inside an enclosed area creates the room automatically',
       roomNext: 'Click sets the next point · Double-click or Enter finishes · Esc cancels',
+      terrainStart: 'Click sets the corners of a terrain area at the height of this level, e.g. the lawn behind a house on a hillside',
+      terrainNext: 'Click sets the next point · Double-click or Enter finishes · Esc cancels',
       dormer: 'Drag a rectangle on a roof face to add a shed dormer · with Shift a gable dormer',
       dimensionStart: 'Click to set the start of the dimension · snaps to corners',
       dimensionEnd: 'Click to set the end of the dimension · Esc cancels',
@@ -170,6 +172,7 @@ export const en: Resources = {
       roofs: 'Modify roofs',
       labels: 'Modify texts',
       dimensionLines: 'Modify dimensions',
+      terrain: 'Modify terrain',
       mixed: 'Modify selection',
       newLabel: 'Add text',
     },
@@ -198,6 +201,17 @@ export const en: Resources = {
       ceiling: 'Ceiling',
       textColor: 'Text color',
     },
+  },
+  terrain: {
+    elevation: 'Height',
+    followLevel: 'Height follows level',
+    noLevel: 'Own height',
+    edge: 'Edge',
+    edges: { wall: 'Vertical (rock, retaining wall)', slope: 'Slope' },
+    slopeAngle: 'Slope angle',
+    hint: 'Like levels, the height counts from level 0. Where a storey lies below the terrain, the house cuts the area out and its walls hold back the soil.',
+    surface: 'Surface (default: ground of the environment)',
+    edgeSurface: 'Vertical edge (default: rock)',
   },
   roof: {
     shapes: {

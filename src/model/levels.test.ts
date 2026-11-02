@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { groundHoles } from '../view3d/groundHoles'
 import { applyCommand } from './commands'
 import { createEmptyHome, type Home, type Room } from './home'
 import { DEFAULT_FLOOR_THICKNESS, newBasementLevel, newLevels, newRoofLevel } from './levels'
+import { houseFootprint } from './terrain'
 
 const basementName = (n: number) => `UG ${n}`
 
@@ -44,7 +44,7 @@ describe('newBasementLevel', () => {
   })
 })
 
-describe('groundHoles', () => {
+describe('houseFootprint', () => {
   const room = (level: string, points: [number, number][]): Room =>
     ({ id: `room-${level}`, name: null, points, floorVisible: true, ceilingVisible: true, level }) as Room
 
@@ -54,11 +54,11 @@ describe('groundHoles', () => {
     const ground = home.levels.find((l) => l.elevation === 0)!
     home.rooms.push(room(basement.id, [[0, 0], [400, 0], [400, 300], [0, 300]]), room(ground.id, [[1000, 0], [1400, 0], [1400, 300], [1000, 300]]))
     home.selectedLevel = ground.id
-    const holes = groundHoles(home)
+    const holes = houseFootprint(home, 0)
     expect(holes).toHaveLength(1)
     expect(holes[0][0]).toContainEqual([400, 300])
 
     basement.viewable = false
-    expect(groundHoles(home)).toEqual([])
+    expect(houseFootprint(home, 0)).toEqual([])
   })
 })

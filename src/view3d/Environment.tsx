@@ -1,7 +1,6 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BufferAttribute,
   CircleGeometry,
   ClampToEdgeWrapping,
   CubeCamera,
@@ -24,17 +23,20 @@ import type { MultiPolygon } from 'polygon-clipping'
 import { setSkyIrradiance } from './eyeAdaptation'
 import { argbToCss } from '../model/colors'
 import { clipping } from '../model/clipping'
-import { backgroundImageTransform, imageToPlan, planToImage, type BackgroundImage, type Surface } from '../model/home'
-import { groundGeometry, polygonsGeometry } from './groundHoles'
+import { backgroundImageTransform, imageToPlan, planToImage, type BackgroundImage, type Home, type Surface } from '../model/home'
+import { TERRAIN_EXTENT, type TerrainFace, type TerrainPatch } from '../model/terrain'
 import { type GroundUniforms, patchGroundShader } from './groundShader'
-import { loadImage } from './materials'
+import { loadImage, surfaceMaterial } from './materials'
+import { DEFAULT_ROCK, facesGeometry, groundUv, patchGeometry } from './terrainGeometry'
 import { createSky, type Daylight, GROUND_BOUNCE } from './sky'
 
 /** Default lawn from the texture catalog of Sweet Home 3D; tile larger than in the catalog so the pattern does not repeat from afar. */
 const LAWN = { color: '/catalog/resources/textures/grass.jpg', tile: 200, tint: '#dfe6cf' }
 /** Shown while the textures load. */
 const LAWN_COLOR = '#5f7a3c'
-const GROUND_SIZE = 400000
+/** Shown while the rock texture loads. */
+const ROCK_COLOR = '#8d8579'
+const GROUND_SIZE = 2 * TERRAIN_EXTENT
 const SKY_RADIUS = 200000
 
 /**
@@ -108,7 +110,6 @@ export function Sky({ environmentSize, daylight }: { environmentSize: number; da
   return <primitive object={sky} />
 }
 
-const NO_HOLES: MultiPolygon = []
 const DEFAULT_GROUND: Surface = { color: null, texture: null }
 
 interface GroundLook {
@@ -166,13 +167,24 @@ function groundMaterial(look: GroundLook | null, anisotropy: number): MeshStanda
   return material
 }
 
+/** Terrain of the 3D view: visible patches and vertical faces, see model/terrain.ts. */
+export interface TerrainScene {
+  home: Pick<Home, 'terrain'>
+  patches: TerrainPatch[]
+  faces: TerrainFace[]
+}
+
+const isDefaultSurface = (surface: Surface | null | undefined) => !surface || (surface.color == null && !surface.texture)
+
 /**
  * Ground up to the horizon just below the terrain, fixed at the origin so the pattern does not
  * move. The user chooses its look (default lawn, color or texture) in the environment dialog.
- * Above basements it has holes ({@link groundHoles}) and then, as soil, also keeps the sun away
- * from basement windows below the terrain.
+ * Terrain areas lie at their own height with the same look (unless they have their own surface)
+ * and end in rock faces or slopes. Where the house lies below the terrain (basements, a house
+ * built into a hillside) the ground has holes and then, as soil, also keeps the sun away from
+ * windows below the terrain.
  */
-export function Ground({ holes = NO_HOLES, ground = DEFAULT_GROUND }: { holes?: MultiPolygon; ground?: Surface }) {
+export function Ground({ terrain, ground = DEFAULT_GROUND }: { terrain: TerrainScene; ground?: Surface }) {
   const gl = useThree((s) => s.gl)
   const [look, setLook] = useState<GroundLook | null>(null)
   const key = JSON.stringify(ground)
@@ -191,18 +203,44 @@ export function Ground({ holes = NO_HOLES, ground = DEFAULT_GROUND }: { holes?: 
     },
     [material],
   )
-  const geometry = useMemo(() => groundGeometry(GROUND_SIZE, holes), [holes])
-  useEffect(() => () => geometry.dispose(), [geometry])
-  return <mesh rotation-x={-Math.PI / 2} position-y={-0.5} geometry={geometry} material={material} receiveShadow castShadow={holes.length > 0} />
+  const meshes = useMemo(() => {
+    const { home, patches, faces } = terrain
+    const tops = patches.map((patch) => {
+      const own = !isDefaultSurface(patch.surface)
+      const geometry = patchGeometry(home, patch)
+      return { geometry: own ? geometry : groundUv(geometry, GROUND_SIZE), surface: own ? patch.surface : null }
+    })
+    const byArea = new Map<number | null, TerrainFace[]>()
+    for (const face of faces) byArea.set(face.area, [...(byArea.get(face.area) ?? []), face])
+    const edges = [...byArea].map(([area, list]) => {
+      const surface = area === null ? null : home.terrain[area]?.edgeSurface
+      return { geometry: facesGeometry(list), surface: isDefaultSurface(surface) ? DEFAULT_ROCK : surface! }
+    })
+    return { tops, edges }
+  }, [terrain])
+  useEffect(() => () => [...meshes.tops, ...meshes.edges].forEach((m) => m.geometry.dispose()), [meshes])
+  // A flat ground without holes casts no shadow (it would only shadow itself)
+  const castShadow = terrain.patches.length > 1 || terrain.patches.some((p) => p.houseHoles.length > 0)
+  return (
+    <group rotation-x={-Math.PI / 2} position-y={-0.5}>
+      {meshes.tops.map((top, i) => (
+        <mesh key={i} geometry={top.geometry} material={top.surface ? surfaceMaterial(top.surface, LAWN_COLOR) : material} receiveShadow castShadow={castShadow} />
+      ))}
+      {meshes.edges.map((edge, i) => (
+        <mesh key={`edge${i}`} geometry={edge.geometry} material={surfaceMaterial(edge.surface, ROCK_COLOR)} receiveShadow castShadow />
+      ))}
+    </group>
+  )
 }
 
 /**
  * Background image of the plan (e.g. an aerial photo) on the ground of the 3D view, like
- * "backgroundImageVisibleOnGround3D" in Sweet Home 3D: the image rectangle lies just above the
- * ground, which continues around it, with the same holes above basements. A plain textured
- * material with real texture coordinates, so the path tracer of the photo mode renders it as is.
+ * "backgroundImageVisibleOnGround3D" in Sweet Home 3D: the image lies just above the terrain
+ * (also on terraces and slopes), which continues around it, with the same holes for the house. A
+ * plain textured material with real texture coordinates, so the path tracer of the photo mode
+ * renders it as is.
  */
-export function AerialGround({ backgroundImage, holes = NO_HOLES }: { backgroundImage: BackgroundImage; holes?: MultiPolygon }) {
+export function AerialGround({ backgroundImage, terrain }: { backgroundImage: BackgroundImage; terrain: TerrainScene }) {
   const gl = useThree((s) => s.gl)
   const [loaded, setLoaded] = useState<{ ref: string; image: HTMLImageElement } | null>(null)
   useEffect(() => {
@@ -235,33 +273,39 @@ export function AerialGround({ backgroundImage, holes = NO_HOLES }: { background
     [material],
   )
 
-  const geometry = useMemo(() => {
-    if (!image) return null
+  const geometries = useMemo(() => {
+    if (!image) return []
     const width = image.naturalWidth
     const height = image.naturalHeight
     const transform = backgroundImageTransform(backgroundImage)
     const corners = ([[0, 0], [width, 0], [width, height], [0, height], [0, 0]] as [number, number][]).map((p) => imageToPlan(transform, p))
-    let area: MultiPolygon = [[corners]]
-    if (holes.length > 0) {
+    const rect: MultiPolygon = [[corners]]
+    return terrain.patches.flatMap((patch) => {
+      let polygons: MultiPolygon
       try {
-        area = clipping.difference(area, holes)
+        polygons = clipping.intersection(rect, patch.polygons)
       } catch {
-        // Without holes rather than without the image
+        return []
       }
-    }
-    const created = polygonsGeometry(area)
-    const position = created.getAttribute('position')
-    const uv = new Float32Array(position.count * 2)
-    for (let i = 0; i < position.count; i++) {
-      const [x, y] = planToImage(transform, [position.getX(i), -position.getY(i)])
-      uv[2 * i] = x / width
-      uv[2 * i + 1] = 1 - y / height
-    }
-    created.setAttribute('uv', new BufferAttribute(uv, 2))
-    return created
-  }, [image, backgroundImage, holes])
-  useEffect(() => () => geometry?.dispose(), [geometry])
+      if (polygons.length === 0) return []
+      const created = patchGeometry(terrain.home, { ...patch, polygons })
+      const position = created.getAttribute('position')
+      const uv = created.getAttribute('uv')
+      for (let i = 0; i < position.count; i++) {
+        const [x, y] = planToImage(transform, [position.getX(i), -position.getY(i)])
+        uv.setXY(i, x / width, 1 - y / height)
+      }
+      return [created]
+    })
+  }, [image, backgroundImage, terrain])
+  useEffect(() => () => geometries.forEach((g) => g.dispose()), [geometries])
 
-  if (!geometry || !material) return null
-  return <mesh rotation-x={-Math.PI / 2} position-y={-0.3} geometry={geometry} material={material} receiveShadow />
+  if (!material) return null
+  return (
+    <group rotation-x={-Math.PI / 2} position-y={-0.3}>
+      {geometries.map((geometry, i) => (
+        <mesh key={i} geometry={geometry} material={material} receiveShadow />
+      ))}
+    </group>
+  )
 }

@@ -20,6 +20,7 @@ import { argbToCss } from '../model/colors'
 import { distanceToSegment, pointInPolygon, type Point, wallPolygon } from '../model/geometry'
 import type { Home, HomePiece, Wall } from '../model/home'
 import { defaultWallHeight, visibleLevels } from '../model/levels'
+import { terrainHeightAt } from '../model/terrain'
 import { homeBounds } from '../plan/hitTest'
 import { adaptationFor, onSkyIrradiance, outdoorIrradiance } from './eyeAdaptation'
 import type { Daylight } from './sky'
@@ -295,6 +296,7 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
   const surface = area.map((a, l) => Math.max(1, 2 * a * cellArea + edges[l] * grid.cell * height))
   // Ein Haus hat ein Dach: auch Räume, deren Decke nicht angezeigt wird, sind überdacht (siehe HomeScene)
   const roofed = area.map((_, l) => l > OUTSIDE)
+  const terrain = home.terrain ?? []
 
   // Türen und Fenster: je Seite, die in einem Raum liegt, eine Öffnung dorthin
   interface Opening {
@@ -319,16 +321,18 @@ function computeLayer(home: Home, grid: Grid, levelIds: Set<string | null>, bott
     const normal: Point = [-(host.yEnd - host.yStart) / length, (host.xEnd - host.xStart) / length]
     const reach = host.thickness / 2 + 1.5 * grid.cell
     const sides = [1, -1].map((sign) => {
-      const index = cellIndex(grid, [piece.x + normal[0] * reach * sign, piece.y + normal[1] * reach * sign])
-      return { sign, index, label: index < 0 ? OUTSIDE : label[index] }
+      const point: Point = [piece.x + normal[0] * reach * sign, piece.y + normal[1] * reach * sign]
+      const index = cellIndex(grid, point)
+      return { sign, index, label: index < 0 ? OUTSIDE : label[index], ground: terrainHeightAt(terrain, point) }
     })
     const openHeight = Math.max(0, Math.min(piece.height, height - piece.elevation))
     const openArea = piece.width * openHeight * (piece.elevation >= WINDOW_SILL ? 1 : DOOR_FACTOR)
     if (openArea <= 0) continue
-    // Fenster von Untergeschossen sehen nach draußen nur mit dem Teil über dem Gelände etwas vom Himmel
-    const aboveGround = MathUtils.clamp(bottom + piece.elevation + openHeight, 0, openHeight) / openHeight
     for (const [side, other] of [sides, [...sides].reverse()]) {
       if (side.label <= OUTSIDE || side.label === other.label) continue
+      // Windows below the terrain in front of them (basements, a house built into a hillside) see
+      // the sky only with the part above the terrain
+      const aboveGround = MathUtils.clamp(bottom + piece.elevation + openHeight - other.ground, 0, openHeight) / openHeight
       const otherSky = other.label > OUTSIDE ? (roofed[other.label] ? 0 : 1) : (other.index >= 0 && covered[other.index] ? SHELTERED : 1) * aboveGround
       const inward: Point = [normal[0] * -other.sign, normal[1] * -other.sign]
       openings.push({ center: [piece.x, piece.y], inward, area: openArea, z: piece.elevation + openHeight / 2, label: side.label, other: other.label, otherSky })
@@ -555,7 +559,7 @@ function writeIndoorLight(data: IndoorLight | null, light: Daylight) {
  * schreibt sie bei jedem neuen Sonnenstand. {@code bright}: Räume immer hell (zum Möblieren).
  */
 export function IndoorLighting({ home, light, bright, adapt }: { home: Home; light: Daylight; bright: boolean; adapt: boolean }) {
-  const { walls, rooms, furniture, levels, selectedLevel, wallHeight } = home
+  const { walls, rooms, furniture, levels, selectedLevel, wallHeight, terrain } = home
   // Andere Möbel beeinflussen das Licht nicht; beim Verschieben eines Stuhls nichts neu berechnen
   const relevant = JSON.stringify(
     furniture
@@ -565,7 +569,7 @@ export function IndoorLighting({ home, light, bright, adapt }: { home: Home; lig
   const data = useMemo(
     () => computeIndoorLight(home),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- relevant fasst die Türen, Fenster und Leuchten zusammen
-    [walls, rooms, relevant, levels, selectedLevel, wallHeight],
+    [walls, rooms, relevant, levels, selectedLevel, wallHeight, terrain],
   )
   useEffect(() => {
     writeIndoorLight(data, light)

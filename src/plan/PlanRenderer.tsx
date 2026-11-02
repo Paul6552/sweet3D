@@ -2,8 +2,8 @@ import { useTheme } from '@mui/material/styles'
 import { memo, useCallback, useMemo } from 'react'
 import { Arrow, Circle, Group, Image, Label, Line, Rect, Shape, Tag, Text } from 'react-konva'
 import { argbToCss } from '../model/colors'
-import { backgroundImageTransform, type BackgroundImage, type Compass, type DimensionLine, type Home, type HomePiece, type Label as HomeLabel, type ObserverCamera, type Roof, type Wall } from '../model/home'
-import { dimensionLength, dimensionOffsetPoints, labelCorners, pitchedSize, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
+import { backgroundImageTransform, type BackgroundImage, type Compass, type DimensionLine, type Home, type HomePiece, type Label as HomeLabel, type ObserverCamera, type Roof, type TerrainArea, type Wall } from '../model/home'
+import { dimensionLength, dimensionOffsetPoints, labelCorners, pitchedSize, pointInPolygon, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { edgeProfile, GABLE, roofModels, type RoofModel } from '../model/roofs'
 import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
 import type { PlanView } from './planStore'
@@ -15,6 +15,8 @@ export interface PlanPreview {
   wall?: Wall
   /** Punkte des Raums, der gerade gezeichnet wird (inkl. Mauszeiger). */
   roomPoints?: Point[]
+  /** Points of the terrain area being drawn (including the mouse pointer). */
+  terrainPoints?: Point[]
   /** Punkte des Dachs, das gerade gezeichnet wird (inkl. Mauszeiger). */
   /** Gaube, die gerade aufgezogen wird. */
   dormer?: Point[]
@@ -60,6 +62,71 @@ const BackgroundImageShape = memo(function BackgroundImageShape({ backgroundImag
   )
 })
 const ROOF_INK_DARK = '#e3a05f'
+const TERRAIN_INK = '#5b7d2c'
+const TERRAIN_INK_DARK = '#a5c977'
+
+/**
+ * Terrain area in the plan: lightly filled outline with its height; a vertical edge (rock face,
+ * retaining wall) is drawn solid and thick, a slope dashed with ticks running down the slope.
+ */
+const TerrainPlanShape = memo(function TerrainPlanShape({ area, scale, color, selected, selectedColor }: { area: TerrainArea; scale: number; color: string; selected: boolean; selectedColor: string }) {
+  const [cx, cy] = polygonCentroid(area.points)
+  const fontSize = 12 / scale
+  const slope = area.edge === 'slope'
+  const sign = area.elevation > 0 ? '+' : area.elevation < 0 ? '−' : '±'
+  // Ticks every 60 px on screen, pointing down the slope (outwards when raised, inwards when lowered)
+  const ticks: number[][] = []
+  if (slope) {
+    const n = area.points.length
+    const down = area.elevation >= 0 ? 1 : -1
+    for (let i = 0; i < n; i++) {
+      const a = area.points[i]
+      const b = area.points[(i + 1) % n]
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1])
+      if (length === 0) continue
+      let nx = (b[1] - a[1]) / length
+      let ny = -(b[0] - a[0]) / length
+      const mid: Point = [(a[0] + b[0]) / 2 + nx, (a[1] + b[1]) / 2 + ny]
+      const flip = (pointInPolygon(mid, area.points) ? -1 : 1) * down
+      nx *= (flip * 10) / scale
+      ny *= (flip * 10) / scale
+      const count = Math.max(1, Math.floor((length * scale) / 60))
+      for (let k = 0; k < count; k++) {
+        const t = (k + 0.5) / count
+        const x = a[0] + (b[0] - a[0]) * t
+        const y = a[1] + (b[1] - a[1]) * t
+        ticks.push([x, y, x + nx, y + ny])
+      }
+    }
+  }
+  const stroke = selected ? selectedColor : color
+  return (
+    <Group listening={false}>
+      <Line
+        points={flat(area.points)}
+        closed
+        fill={`${color}14`}
+        stroke={stroke}
+        strokeWidth={(selected ? 3 : slope ? 1.2 : 2.5) / scale}
+        dash={slope ? [8 / scale, 4 / scale] : undefined}
+      />
+      {ticks.map((tick, i) => (
+        <Line key={i} points={tick} stroke={stroke} strokeWidth={1 / scale} />
+      ))}
+      <Text
+        x={cx}
+        y={cy}
+        text={`${area.name ? `${area.name}\n` : ''}${sign}${Math.abs(Math.round(area.elevation))} cm`}
+        fontSize={fontSize}
+        fill={color}
+        align="center"
+        width={200 / scale}
+        offsetX={100 / scale}
+        offsetY={fontSize / 2}
+      />
+    </Group>
+  )
+})
 const degreesText = (radians: number) => `${Math.round((radians * 180) / Math.PI)}°`
 
 /**
@@ -394,6 +461,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
   }, [wallsBelow])
   const fontSize = 12 / scale
   const roofInk = dark ? ROOF_INK_DARK : ROOF_INK
+  const terrainInk = dark ? TERRAIN_INK_DARK : TERRAIN_INK
   const models = useMemo(() => roofModels(home), [home])
 
   const wallShape = useCallback(
@@ -419,6 +487,10 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
   const shapes = useMemo(
     () => (
       <>
+        {home.terrain.map((area) => (
+          <TerrainPlanShape key={area.id} area={area} scale={scale} color={terrainInk} selected={selected.has(area.id)} selectedColor={selectedColor} />
+        ))}
+
         {below.map(({ id, polygon }) => (
           <Line
             key={`below-${id}`}
@@ -494,7 +566,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         ))}
       </>
     ),
-    [below, home.rooms, home.walls, home.roofs, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink, models, roofInk, roofsBelow],
+    [below, home.terrain, home.rooms, home.walls, home.roofs, home.furniture, home.dimensionLines, home.labels, wallsById, selected, scale, dark, theme, fontSize, selectedColor, wallShape, ink, models, roofInk, terrainInk, roofsBelow],
   )
 
   const { backgroundImage } = home.environment
@@ -530,6 +602,17 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
         />
       )}
 
+      {preview.terrainPoints && preview.terrainPoints.length > 1 && (
+        <Line
+          points={flat(preview.terrainPoints)}
+          closed={preview.terrainPoints.length > 2}
+          fill={`${terrainInk}22`}
+          stroke={selectedColor}
+          strokeWidth={2 / scale}
+          dash={[6 / scale, 4 / scale]}
+          listening={false}
+        />
+      )}
 
       {preview.dormer && <Line points={flat(preview.dormer)} closed fill={`${roofInk}33`} stroke={selectedColor} strokeWidth={2 / scale} dash={[6 / scale, 4 / scale]} listening={false} />}
 
@@ -542,7 +625,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
           height={10 / scale}
           offsetX={5 / scale}
           offsetY={5 / scale}
-          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' ? 5 / scale : 0}
+          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' || handle.kind === 'terrainMid' ? 5 / scale : 0}
           fill={theme.palette.background.paper}
           stroke={selectedColor}
           strokeWidth={2 / scale}

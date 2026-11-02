@@ -6,14 +6,14 @@ import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import Typography from '@mui/material/Typography'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { HomeCommand } from '../model/commands'
 import { dimensionLength } from '../model/geometry'
-import type { DimensionLine, HomePiece, Room, Wall } from '../model/home'
+import type { DimensionLine, HomePiece, Room, TerrainArea, Wall } from '../model/home'
 import { useRoofFields } from './RoofFields'
 import { executeCommand, useEditorStore } from '../store/editorStore'
-import { collectChanges, DEFAULT_SURFACE, degrees, useCheckField, useNumberField, useSurfaceField, useTextField, show, wide } from './fields'
+import { collectChanges, DEFAULT_SURFACE, degrees, useCheckField, useNumberField, useSelectField, useSurfaceField, useTextField, show, wide } from './fields'
 import { Grid } from './layout'
 import { useLabelFields } from './labelFields'
 
@@ -112,6 +112,59 @@ function useDimensionFields(lines: DimensionLine[]) {
   return { fields, node: <Grid>{show(fields)}</Grid> }
 }
 
+/** No level: the area keeps its own height. */
+const NO_LEVEL = ''
+
+function useTerrainFields(areas: TerrainArea[]) {
+  const { t } = useTranslation()
+  const allLevels = useEditorStore((s) => s.home!.levels)
+  const levels = useMemo(() => allLevels.filter((l) => !l.roof), [allLevels])
+  const name = useTextField(areas, t('furniture.name'), (a) => a.name, (c, v) => (c.name = v.trim() || null))
+  // Applied in this order: a typed height stops following a level, a chosen level sets the height
+  const elevation = useNumberField(areas, t('terrain.elevation'), (a) => a.elevation, (c, v) => {
+    c.elevation = v!
+    c.followLevel = null
+  })
+  const follow = useSelectField(
+    areas,
+    t('terrain.followLevel'),
+    [{ value: NO_LEVEL, label: t('terrain.noLevel') }, ...levels.map((l) => ({ value: l.id, label: `${l.name} (${Math.round(l.elevation)} cm)` }))],
+    (a) => a.followLevel ?? NO_LEVEL,
+    (c, v) => {
+      c.followLevel = v === NO_LEVEL ? null : v
+      const level = levels.find((l) => l.id === v)
+      if (level) c.elevation = level.elevation
+    },
+  )
+  const edge = useSelectField(
+    areas,
+    t('terrain.edge'),
+    [
+      { value: 'wall' as const, label: t('terrain.edges.wall') },
+      { value: 'slope' as const, label: t('terrain.edges.slope') },
+    ],
+    (a) => a.edge,
+    (c, v) => (c.edge = v),
+  )
+  const slopeAngle = useNumberField(areas, t('terrain.slopeAngle'), (a) => a.slopeAngle, (c, v) => (c.slopeAngle = v!), { ...degrees, min: 0, exclusiveMin: true })
+  const surfaces = [
+    useSurfaceField(areas, t('terrain.surface'), (a) => a.surface ?? DEFAULT_SURFACE, (c, s) => (c.surface = s)),
+    useSurfaceField(areas, t('terrain.edgeSurface'), (a) => a.edgeSurface ?? DEFAULT_SURFACE, (c, s) => (c.edgeSurface = s)),
+  ]
+  const main = [elevation, follow, edge, slopeAngle]
+  const node = (
+    <Grid>
+      <Box sx={{ gridColumn: '1 / -1' }}>{name.node}</Box>
+      {show(main)}
+      <Typography variant="body2" color="text.secondary" sx={{ gridColumn: '1 / -1' }}>
+        {t('terrain.hint')}
+      </Typography>
+      {wide(surfaces)}
+    </Grid>
+  )
+  return { fields: [name, ...main, ...surfaces], node }
+}
+
 /** Eigenschaften der ausgewählten Objekte; bei gemischter Auswahl je Art ein Abschnitt. */
 export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const { t } = useTranslation()
@@ -127,6 +180,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
       roofs: pick(home.roofs),
       labels: pick(home.labels),
       dimensionLines: pick(home.dimensionLines),
+      terrain: pick(home.terrain),
     }
   })
   const pieces = usePieceFields(items.furniture)
@@ -135,6 +189,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
   const roofs = useRoofFields(items.roofs)
   const labels = useLabelFields(items.labels)
   const dimensions = useDimensionFields(items.dimensionLines)
+  const terrain = useTerrainFields(items.terrain)
 
   const sections = [
     { key: 'furniture', items: items.furniture, ...pieces, title: t('dialogs.titles.furniture') },
@@ -143,6 +198,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
     { key: 'roofs', items: items.roofs, ...roofs, title: t('dialogs.titles.roofs') },
     { key: 'labels', items: items.labels, ...labels, title: t('dialogs.titles.labels') },
     { key: 'dimensionLines', items: items.dimensionLines, ...dimensions, title: t('dialogs.titles.dimensionLines') },
+    { key: 'terrain', items: items.terrain, ...terrain, title: t('dialogs.titles.terrain') },
   ].filter((s) => s.items.length > 0)
   const valid = sections.every((s) => s.fields.every((f) => f.valid))
 
@@ -155,6 +211,7 @@ export function ItemDialog({ ids, onClose }: { ids: string[]; onClose: () => voi
       { type: 'updateRoofs', changes: collectChanges(items.roofs, roofs.fields) },
       { type: 'updateLabels', changes: collectChanges(items.labels, labels.fields) },
       { type: 'updateDimensionLines', changes: collectChanges(items.dimensionLines, dimensions.fields) },
+      { type: 'updateTerrain', changes: collectChanges(items.terrain, terrain.fields) },
     ]
     const changed = commands.filter((c) => 'changes' in c && c.changes.length > 0)
     if (changed.length > 0) executeCommand(changed.length === 1 ? changed[0] : { type: 'batch', commands: changed })

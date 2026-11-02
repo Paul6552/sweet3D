@@ -422,6 +422,33 @@ export function defaultEnvironment(): HomeEnvironment {
   return { ground: { color: null, texture: null }, backgroundImage: null, backgroundImageOnGround: true }
 }
 
+/** Edge of a terrain area: vertical (rock face, retaining wall) or a slope down/up to the terrain around it. */
+export type TerrainEdge = 'wall' | 'slope'
+
+/**
+ * Flat terrain area at its own height (terrace), e.g. the lawn behind a house built into a
+ * hillside, a rock plateau or a driveway cut into the hill. Sweet Home 3D has no terrain, so this
+ * is stored as a home property in .sh3d files. Areas apply to all levels; later areas take
+ * precedence over earlier ones where they overlap.
+ */
+export interface TerrainArea {
+  id: string
+  name: string | null
+  /** Outline in plan coordinates (cm). */
+  points: [number, number][]
+  /** Absolute height of the area in cm, same reference as {@link Level.elevation}. */
+  elevation: number
+  /** Level whose floor height the area follows (elevation is then kept equal to it), or null. */
+  followLevel: string | null
+  edge: TerrainEdge
+  /** Angle of the slope for {@code edge: 'slope'} in radians. */
+  slopeAngle: number
+  /** Surface of the area; default (null color and texture) = ground of the environment. */
+  surface?: Surface
+  /** Surface of vertical edges; default = rock. */
+  edgeSurface?: Surface
+}
+
 export interface Home {
   formatVersion: 1
   wallHeight: number
@@ -440,6 +467,8 @@ export interface Home {
   compass: Compass
   /** Surroundings of the 3D view like HomeEnvironment in Sweet Home 3D. */
   environment: HomeEnvironment
+  /** Terrain areas at their own height; without any, the terrain is flat at height 0. */
+  terrain: TerrainArea[]
   /**
    * Benutzerdefinierte Bibliotheken, aus denen Möbel oder Texturen stammen, auch wenn sie hier
    * nicht installiert sind (z. B. aus einer weitergegebenen Datei), siehe catalog/libraries.ts.
@@ -466,6 +495,7 @@ export function createEmptyHome(): Home {
     },
     compass: defaultCompass(),
     environment: defaultEnvironment(),
+    terrain: [],
   }
 }
 
@@ -491,6 +521,7 @@ export function normalizeHome(raw: unknown): Home {
     camera: { ...empty.camera, ...home.camera },
     compass,
     environment: { ...empty.environment, ...home.environment },
+    terrain: home.terrain ?? [],
     ...(home.libraries && home.libraries.length > 0 ? { libraries: home.libraries } : {}),
   }
 }

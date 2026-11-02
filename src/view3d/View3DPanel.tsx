@@ -26,8 +26,8 @@ import { homeBounds } from '../plan/hitTest'
 import { openEnvironmentDialog } from '../dialogs/dialogStore'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
-import { AerialGround, Ground, Sky } from './Environment'
-import { groundHoles } from './groundHoles'
+import { AerialGround, Ground, Sky, type TerrainScene } from './Environment'
+import { terrainFaces, terrainPatches } from '../model/terrain'
 import { type Daylight, daylight } from './sky'
 import { sunDirection, sunPosition } from './sun'
 import { SunPopover } from './SunPopover'
@@ -51,9 +51,11 @@ function sceneBounds(home: Home, allLevels = false): SceneBounds {
   const visible = new Set(levels.map((l) => l?.id ?? null))
   // Dächer ragen über die Ebenen hinaus
   const roofTops = home.roofs.filter((r) => visible.has(r.level)).map((r) => levelElevation(home, r.level) + rawRoofModel(home, r).ridge)
-  const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)), ...roofTops)
+  // Terrain areas (terraces, rock faces) also cast and receive shadows
+  const terrainHeights = (home.terrain ?? []).map((a) => a.elevation)
+  const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)), ...roofTops, ...terrainHeights)
   // Untergeschosse reichen unter das Gelände
-  const bottom = Math.min(0, ...levels.map((l) => l?.elevation ?? 0))
+  const bottom = Math.min(0, ...levels.map((l) => l?.elevation ?? 0), ...terrainHeights)
   const center = new Vector3((b.minX + b.maxX) / 2, bottom + (top - bottom) / 3, (b.minY + b.maxY) / 2)
   const radius = Math.max(b.maxX - b.minX, b.maxY - b.minY, top - bottom) / 2 + 100
   return { center, radius }
@@ -222,6 +224,7 @@ export function View3DPanel() {
   const wallHeight = home?.wallHeight
   const levels = home?.levels
   const level = home?.selectedLevel
+  const terrainAreas = home?.terrain
   const geometry = useMemo(
     () =>
       ({
@@ -235,12 +238,16 @@ export function View3DPanel() {
         wallHeight: wallHeight ?? 250,
         levels: levels ?? [],
         selectedLevel: level ?? null,
+        terrain: terrainAreas ?? [],
       }) as unknown as Home,
-    [walls, furniture, rooms, roofs, wallHeight, levels, level],
+    [walls, furniture, rooms, roofs, wallHeight, levels, level, terrainAreas],
   )
   const bounds = useMemo(() => sceneBounds(geometry), [geometry])
   const shadowBounds = useMemo(() => sceneBounds(geometry, true), [geometry])
-  const holes = useMemo(() => groundHoles(geometry), [geometry])
+  const terrain = useMemo((): TerrainScene => {
+    const patches = terrainPatches(geometry)
+    return { home: geometry, patches, faces: terrainFaces(geometry, patches) }
+  }, [geometry])
   // Sonnenstand aus Kompass und Uhrzeit; auf etwa ein halbes Grad gerundet, damit das Umgebungslicht
   // beim Ziehen am Zeitregler nicht bei jedem Schritt neu berechnet werden muss
   const compass = home?.compass
@@ -328,9 +335,9 @@ export function View3DPanel() {
             <IndoorLighting home={geometry} light={light} bright={brightRooms} adapt={mode === 'aerial'} />
             <EyeAdaptation light={light} enabled={mode === 'observer' && !brightRooms} />
             {mode === 'aerial' ? <AerialCamera bounds={bounds} fitRequest={fitRequest} /> : <ObserverCameraRig />}
-            <Ground holes={holes} ground={home.environment.ground} />
+            <Ground terrain={terrain} ground={home.environment.ground} />
             {home.environment.backgroundImage && home.environment.backgroundImageOnGround && (
-              <AerialGround backgroundImage={home.environment.backgroundImage} holes={holes} />
+              <AerialGround backgroundImage={home.environment.backgroundImage} terrain={terrain} />
             )}
             <HomeScene
               home={home}

@@ -1,6 +1,7 @@
-import { homeItems, type Compass, type HomeEnvironment, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type Wall } from './home'
+import { homeItems, type Compass, type HomeEnvironment, type DimensionLine, type Home, type HomePiece, type Label, type Level, type Roof, type Room, type TerrainArea, type Wall } from './home'
 import { settleRoofLevel, sortLevels } from './levels'
 import { refitSkylights } from './roofs'
+import { settleTerrain } from './terrain'
 
 type Change<T extends { id: string }> = Partial<T> & { id: string }
 
@@ -9,13 +10,15 @@ type Change<T extends { id: string }> = Partial<T> & { id: string }
  * per BroadcastChannel an das Editor-Hauptfenster schicken können.
  */
 export type HomeCommand =
-  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; roofs?: Roof[]; furniture?: HomePiece[]; dimensionLines?: DimensionLine[]; labels?: Label[] }
+  /** Terrain areas apply to all levels and are not put on the selected one. */
+  | { type: 'addItems'; walls?: Wall[]; rooms?: Room[]; roofs?: Roof[]; furniture?: HomePiece[]; dimensionLines?: DimensionLine[]; labels?: Label[]; terrain?: TerrainArea[] }
   | { type: 'updateWalls'; changes: Change<Wall>[] }
   | { type: 'updateRooms'; changes: Change<Room>[] }
   | { type: 'updateRoofs'; changes: Change<Roof>[] }
   | { type: 'updateFurniture'; changes: Change<HomePiece>[] }
   | { type: 'updateDimensionLines'; changes: Change<DimensionLine>[] }
   | { type: 'updateLabels'; changes: Change<Label>[] }
+  | { type: 'updateTerrain'; changes: Change<TerrainArea>[] }
   | { type: 'moveItems'; ids: string[]; dx: number; dy: number }
   | { type: 'deleteItems'; ids: string[] }
   /**
@@ -50,6 +53,8 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       home.furniture.push(...(command.furniture ?? []).map((p) => ({ ...p, level })))
       home.dimensionLines.push(...(command.dimensionLines ?? []).map((d) => ({ ...d, level })))
       home.labels.push(...(command.labels ?? []).map((l) => ({ ...l, level })))
+      home.terrain.push(...(command.terrain ?? []))
+      settleTerrain(home)
       break
     }
     case 'addLevels':
@@ -60,6 +65,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       settleRoofLevel(home.levels)
       home.levels = sortLevels(home.levels)
       home.selectedLevel = command.levels[command.levels.length - 1]?.id ?? home.selectedLevel
+      settleTerrain(home)
       break
     case 'updateLevel': {
       const level = home.levels.find((l) => l.id === command.change.id)
@@ -67,6 +73,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       // Das Dach-Niveau folgt dem obersten Geschoss, außer es wird selbst geändert
       if (level && !level.roof) settleRoofLevel(home.levels)
       home.levels = sortLevels(home.levels)
+      settleTerrain(home)
       break
     }
     case 'deleteLevel': {
@@ -82,6 +89,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
         // Letzte Ebene gelöscht: wieder ein Projekt ohne Ebenen
         for (const item of homeItems(home)) item.level = null
       }
+      settleTerrain(home)
       break
     }
     case 'updateWalls':
@@ -102,6 +110,10 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       break
     case 'updateLabels':
       applyChanges(home.labels, command.changes)
+      break
+    case 'updateTerrain':
+      applyChanges(home.terrain, command.changes)
+      settleTerrain(home)
       break
     case 'moveItems':
       moveItems(home, new Set(command.ids), command.dx, command.dy)
@@ -130,6 +142,7 @@ export function applyCommand(home: Home, command: HomeCommand): void {
       home.furniture = home.furniture.filter((p) => !ids.has(p.id))
       home.dimensionLines = home.dimensionLines.filter((d) => !ids.has(d.id))
       home.labels = home.labels.filter((l) => !ids.has(l.id))
+      home.terrain = home.terrain.filter((a) => !ids.has(a.id))
       // Verbindungen zu gelöschten Wänden lösen
       for (const wall of home.walls) {
         if (wall.wallAtStart && ids.has(wall.wallAtStart)) wall.wallAtStart = null
@@ -191,6 +204,9 @@ function moveItems(home: Home, moved: Set<string>, dx: number, dy: number): void
     if (!ids.has(roof.id)) continue
     roof.points = roof.points.map(([x, y]) => [x + dx, y + dy])
     roof.holes = roof.holes.map((hole) => hole.map(([x, y]) => [x + dx, y + dy]))
+  }
+  for (const area of home.terrain) {
+    if (ids.has(area.id)) area.points = area.points.map(([x, y]) => [x + dx, y + dy])
   }
   for (const item of [...home.furniture, ...home.labels]) {
     if (ids.has(item.id)) {

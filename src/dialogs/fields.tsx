@@ -1,6 +1,7 @@
 import Box from '@mui/material/Box'
 import Checkbox from '@mui/material/Checkbox'
 import FormControlLabel from '@mui/material/FormControlLabel'
+import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import { Fragment, useState, type ReactNode } from 'react'
 import type { Surface } from '../model/home'
@@ -123,6 +124,32 @@ export function useTextField<T>(
         onChange={(e) => setText(e.target.value)}
         slotProps={{ inputLabel: { shrink: true } }}
       />
+    ),
+  }
+}
+
+/** Choice from a list; with different values among the items the field stays empty until chosen. */
+export function useSelectField<T, V extends string>(
+  items: T[],
+  label: string,
+  options: { value: V; label: string }[],
+  get: (item: T) => V,
+  set: (change: Partial<T>, value: V) => void,
+): Field<T> {
+  const shared = sharedValue(items, get)
+  const [value, setValue] = useState<V | undefined>(shared)
+  return {
+    dirty: value !== shared,
+    valid: true,
+    apply: (change) => set(change, value!),
+    node: (
+      <TextField select size="small" label={label} value={value ?? ''} onChange={(e) => setValue(e.target.value as V)} slotProps={{ inputLabel: { shrink: true } }}>
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.label}
+          </MenuItem>
+        ))}
+      </TextField>
     ),
   }
 }

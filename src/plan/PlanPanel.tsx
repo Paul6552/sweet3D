@@ -9,6 +9,7 @@ import PanToolOutlined from '@mui/icons-material/PanToolOutlined'
 import Polyline from '@mui/icons-material/Polyline'
 import Roofing from '@mui/icons-material/Roofing'
 import Straighten from '@mui/icons-material/Straighten'
+import TerrainOutlined from '@mui/icons-material/TerrainOutlined'
 import TextFields from '@mui/icons-material/TextFields'
 import ZoomIn from '@mui/icons-material/ZoomIn'
 import ZoomOut from '@mui/icons-material/ZoomOut'
@@ -39,6 +40,7 @@ const MODES: { mode: PlanMode | 'roof'; icon: React.ReactNode; key: string }[] =
   { mode: 'pan', icon: <PanToolOutlined fontSize="small" />, key: 'H' },
   { mode: 'wall', icon: <Polyline fontSize="small" />, key: 'W' },
   { mode: 'room', icon: <FormatShapes fontSize="small" />, key: 'R' },
+  { mode: 'terrain', icon: <TerrainOutlined fontSize="small" />, key: 'E' },
   { mode: 'roof', icon: <Roofing fontSize="small" />, key: 'D' },
   { mode: 'dormer', icon: <Cottage fontSize="small" />, key: 'G' },
   { mode: 'dimension', icon: <Straighten fontSize="small" />, key: 'M' },

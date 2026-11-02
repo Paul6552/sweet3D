@@ -15,13 +15,15 @@ import {
   type LightInfo,
   type Room,
   type Surface,
+  type TerrainArea,
   type TextureMaps,
   type TextureRef,
   type Wall,
 } from '../model/home'
 import { DEFAULT_FLOOR_THICKNESS, levelElevation, sortLevels } from '../model/levels'
+import { DEFAULT_SLOPE_ANGLE } from '../model/terrain'
 import { toObserverPitch, toObserverYaw } from './sh3dCamera'
-import { BACKGROUND_ROTATION_PROPERTY, LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_LEVEL_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
+import { BACKGROUND_ROTATION_PROPERTY, TERRAIN_PROPERTY, LIBRARIES_PROPERTY, LIBRARY_ID_PROPERTY, ROOF_ID_PROPERTY, ROOF_LEVEL_PROPERTY, ROOF_PROPERTY, TEXTURE_EXTRAS_PROPERTY, TO_ROOF_PROPERTY, type TextureExtras } from './sh3dExport'
 
 export interface ImportResult {
   home: Home
@@ -140,6 +142,12 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
   const libraries = parseJson<LibraryInfo[]>(property(root, LIBRARIES_PROPERTY))
   if (Array.isArray(libraries) && libraries.length > 0) home.libraries = libraries.filter((l) => l && typeof l.id === 'string')
   const textureExtras = parseJson<TextureExtras>(property(root, TEXTURE_EXTRAS_PROPERTY)) ?? {}
+  const terrain = parseJson<TerrainArea[]>(property(root, TERRAIN_PROPERTY))
+  if (Array.isArray(terrain)) {
+    home.terrain = terrain
+      .filter((a) => a && typeof a.id === 'string' && Array.isArray(a.points) && a.points.length >= 3 && Number.isFinite(a.elevation))
+      .map((a) => ({ ...a, name: a.name ?? null, followLevel: a.followLevel ?? null, edge: a.edge === 'slope' ? 'slope' : 'wall', slopeAngle: Number.isFinite(a.slopeAngle) ? a.slopeAngle : DEFAULT_SLOPE_ANGLE }))
+  }
 
   // Texturen aus dem Katalog (auch importierten Bibliotheken) verweisen auf dessen Bilder, alle anderen werden übernommen
   const catalogTextures = new Map((textures?.categories ?? []).flatMap((c) => c.textures).map((t) => [t.id, t]))

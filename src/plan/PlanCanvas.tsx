@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
 import { dimensionLength, distance, distanceToSegment, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
-import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type Wall } from '../model/home'
+import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type TerrainArea, type Wall } from '../model/home'
+import { DEFAULT_SLOPE_ANGLE } from '../model/terrain'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
 import { createDormer, rawRoofModel, roofContour, roofHeightAt } from '../model/roofs'
 import { wheelDelta } from '../editor/wheel'
@@ -173,6 +174,19 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
       const edges = [...roof.edges.slice(0, index + 1), { ...roof.edges[index] }, ...roof.edges.slice(index + 1)]
       return { type: 'updateRoofs', changes: [{ id: roof.id, points, edges }] }
     }
+    case 'terrainPoint':
+    case 'terrainMid': {
+      const { area, index } = handle
+      if (handle.kind === 'terrainMid') {
+        const a = area.points[index]
+        const b = area.points[(index + 1) % area.points.length]
+        if (distance(current, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) < DRAG_THRESHOLD_PX / scale) return null
+      }
+      const others = area.points.filter((_, i) => handle.kind === 'terrainMid' || i !== index)
+      const point = roundPoint(magnetism ? snapToPoints(current, [...roomSnapPoints(home), ...others], SNAP_TOLERANCE_PX / scale) : current)
+      const points = handle.kind === 'terrainPoint' ? area.points.map((p, i) => (i === index ? point : p)) : [...area.points.slice(0, index + 1), point, ...area.points.slice(index + 1)]
+      return { type: 'updateTerrain', changes: [{ id: area.id, points }] }
+    }
     case 'wallStart':
     case 'wallEnd': {
       const { wall } = handle
@@ -210,7 +224,7 @@ function gestureLabel(preview: Home, gesture: Gesture): string | null {
       if (!line) return null
       return handle.kind === 'dimensionOffset' ? `${line.offset} cm` : `${round1(dimensionLength(line))} cm`
     }
-    if ('roof' in handle) return null
+    if ('roof' in handle || 'area' in handle) return null
     const id = 'piece' in handle ? handle.piece.id : handle.wall.id
     const piece = preview.furniture.find((p) => p.id === id)
     const wall = preview.walls.find((w) => w.id === id)
@@ -369,6 +383,29 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     [],
   )
 
+  const finishTerrain = useCallback((points: Point[]) => {
+    const unique = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5)
+    if (unique.length > 2 && distance(unique[0], unique.at(-1)!) < 0.5) unique.pop()
+    if (unique.length >= 3) {
+      // A new area lies at the floor height of the level it is drawn on and follows it
+      const current = useEditorStore.getState().home!
+      const level = current.levels.find((l) => l.id === current.selectedLevel && !l.roof) ?? null
+      const area: TerrainArea = {
+        id: newId('terrain'),
+        name: null,
+        points: unique,
+        elevation: level?.elevation ?? 0,
+        followLevel: level?.id ?? null,
+        edge: 'wall',
+        slopeAngle: DEFAULT_SLOPE_ANGLE,
+      }
+      executeCommand({ type: 'addItems', terrain: [area] })
+      dispatch({ type: 'select', ids: [area.id] })
+      openItemDialog([area.id])
+    }
+    setRoomPoints([])
+  }, [])
+
   // Tastatur: Esc bricht ab, Enter beendet einen Raum, Leertaste zum Verschieben der Ansicht
   useEffect(() => {
     const isInput = (event: KeyboardEvent) => (event.target as HTMLElement | null)?.closest('input, textarea') != null
@@ -393,7 +430,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
         setRoomPoints([])
         setDimension(null)
       } else if (event.key === 'Enter' && roomPoints.length > 0) {
-        finishRoom(roomPoints)
+        if (usePlanStore.getState().mode === 'terrain') finishTerrain(roomPoints)
+        else finishRoom(roomPoints)
       }
     }
     const onKeyUp = (event: KeyboardEvent) => {
@@ -405,7 +443,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [roomPoints, finishRoom])
+  }, [roomPoints, finishRoom, finishTerrain])
 
   const onPointerDown = (event: React.PointerEvent) => {
     containerRef.current!.focus()
@@ -459,7 +497,7 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       executeCommand(command)
       // Auf ein freies Wandende getroffen (z. B. Kette geschlossen): Kette beenden
       setChain(end.join ? null : { start: end.point, join: { point: end.point, wall, atStart: false }, previousId: wall.id })
-    } else if (mode === 'room') {
+    } else if (mode === 'room' || mode === 'terrain') {
       const snapped = magnet ? snapToPoints(point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : point
       setRoomPoints((points) => [...points, roundPoint(snapped)])
     } else if (mode === 'dormer') {
@@ -562,6 +600,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       else if (hitCompass(home, point, scale, HANDLE_TOLERANCE_PX / scale)) openCompassDialog()
     } else if (mode === 'wall') {
       setChain(null)
+    } else if (mode === 'terrain') {
+      finishTerrain(roomPoints)
     } else if (mode === 'room') {
       const points = roomPoints.filter((p, i) => i === 0 || distance(p, roomPoints[i - 1]) > 0.5)
       if (points.length >= 3) {
@@ -616,9 +656,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     preview.wall = wall
     preview.label = { point: pointer.point, text: `${round1(wallLength(wall))} cm · ${degrees(-Math.atan2(wall.yEnd - wall.yStart, wall.xEnd - wall.xStart))}°` }
   }
-  if (mode === 'room' && roomPoints.length > 0 && pointer) {
+  if ((mode === 'room' || mode === 'terrain') && roomPoints.length > 0 && pointer) {
     const next = magnetNow ? snapToPoints(pointer.point, roomSnapPoints(home), SNAP_TOLERANCE_PX / scale) : pointer.point
-    preview.roomPoints = [...roomPoints, next]
+    if (mode === 'terrain') preview.terrainPoints = [...roomPoints, next]
+    else preview.roomPoints = [...roomPoints, next]
   }
   if (mode === 'dimension' && dimension && pointer) {
     const end = dimension.end ?? dimensionPoint(home, dimension.start, pointer.point, magnetNow, scale)
@@ -647,6 +688,8 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       ? t(chain ? 'plan.hints.wallNext' : 'plan.hints.wallStart')
       : mode === 'room'
         ? t(roomPoints.length > 0 ? 'plan.hints.roomNext' : 'plan.hints.roomStart')
+        : mode === 'terrain'
+          ? t(roomPoints.length > 0 ? 'plan.hints.terrainNext' : 'plan.hints.terrainStart')
         : mode === 'dormer'
           ? t('plan.hints.dormer')
         : mode === 'dimension'

@@ -28,6 +28,8 @@ export const ROOF_ID_PROPERTY = 'sweet3d.roofId'
 export const ROOF_LEVEL_PROPERTY = 'sweet3d.roofLevel'
 /** Rotation of the background image in radians; Sweet Home 3D shows it unrotated. */
 export const BACKGROUND_ROTATION_PROPERTY = 'sweet3d.backgroundImageRotation'
+/** Terrain areas as JSON; Sweet Home 3D has no terrain and keeps showing its flat ground. */
+export const TERRAIN_PROPERTY = 'sweet3d.terrain'
 
 export type TextureExtras = Record<string, { maps?: TextureMaps; libraryId?: string }>
 
@@ -243,6 +245,7 @@ export async function exportSh3d(home: Home, catalog: CatalogPiece[], libraries:
     ...(libraries.length > 0 ? [`  ${element('property', { name: LIBRARIES_PROPERTY, value: JSON.stringify(libraries) })}`] : []),
     ...(Object.keys(textureExtras).length > 0 ? [`  ${element('property', { name: TEXTURE_EXTRAS_PROPERTY, value: JSON.stringify(textureExtras) })}`] : []),
     ...(backgroundRotation !== null ? [`  ${element('property', { name: BACKGROUND_ROTATION_PROPERTY, value: String(backgroundRotation) })}`] : []),
+    ...(home.terrain.length > 0 ? [`  ${element('property', { name: TERRAIN_PROPERTY, value: JSON.stringify(home.terrain) })}`] : []),
     ...['NAME', 'WIDTH', 'DEPTH', 'HEIGHT', 'VISIBLE'].map((name) => `  <furnitureVisibleProperty name='${name}'/>`),
     ...environment,
     // DTD order: environment, backgroundImage, print, compass

@@ -35,7 +35,7 @@ Tests are colocated (`*.test.ts`) and cover pure model/geometry code (levels, ro
 ### Data model and commands (`src/model/`)
 - `home.ts` defines the `Home` document (walls, rooms, roofs, furniture, dimension lines, labels, levels, compass, camera). Every item carries a `level` id.
 - All mutations are `HomeCommand`s (`commands.ts`) — **plain serializable data**, applied by `applyCommand(draft, command)` on an immer draft. `batch` groups commands into one undo step. Never mutate `home` elsewhere; add a new command type instead.
-- Heavy geometry lives here as pure functions: `roofs.ts` + `roofSkeleton.ts` (weighted straight skeleton with edge profiles, dormers, skylights), `levels.ts` (level ordering, the special roof level that follows the top storey, basements with negative elevation), `clipping.ts` (polygon-clipping wrapper).
+- Heavy geometry lives here as pure functions: `roofs.ts` + `roofSkeleton.ts` (weighted straight skeleton with edge profiles, dormers, skylights), `levels.ts` (level ordering, the special roof level that follows the top storey, basements with negative elevation), `terrain.ts` (terrain areas/terraces with vertical or sloped edges; patches, rock faces and the holes the house cuts where a storey lies below the terrain), `clipping.ts` (polygon-clipping wrapper).
 
 ### Leader/follower sync and undo (`src/sync/`, `src/store/editorStore.ts`)
 - Any panel (catalog, furniture list, plan, 3D view) can be detached into its own browser window (route `/editor/$projectId/panel/$panelId?leader=…`).
@@ -53,7 +53,7 @@ Tests are colocated (`*.test.ts`) and cover pure model/geometry code (levels, ro
 
 ### Views
 - `src/plan/`: Konva 2D editor — `PlanCanvas`/`PlanRenderer`, `hitTest.ts`, `magnetism.ts` (snapping), `wallEditing.ts` (mitered joints), `roomDetection.ts`; transient tool state in `planStore.ts`.
-- `src/view3d/`: r3f scene built from the `Home` — `wallGeometry.ts` (openings for doors/windows), `roofGeometry.ts`, `staircases.ts` (stairs cut floor/ceiling openings), `groundHoles.ts` (basements), `materials.ts`/`modelLoader.ts`, and lighting (`sun.ts` NOAA sun position from compass + date/time, `sky.ts`, `indoorLight.ts` per-level light maps so enclosed rooms get light only through windows/lights, `eyeAdaptation.ts`, `brightRooms.ts` for the “Räume immer hell” mode).
+- `src/view3d/`: r3f scene built from the `Home` — `wallGeometry.ts` (openings for doors/windows), `roofGeometry.ts`, `staircases.ts` (stairs cut floor/ceiling openings), `terrainGeometry.ts` (terrain meshes in the ground's local frame so the ground shader continues over terraces), `materials.ts`/`modelLoader.ts`, and lighting (`sun.ts` NOAA sun position from compass + date/time, `sky.ts`, `indoorLight.ts` per-level light maps so enclosed rooms get light only through windows/lights, `eyeAdaptation.ts`, `brightRooms.ts` for the “Räume immer hell” mode).
 - Photo mode (`PhotoDialog.tsx`, `pathTracerShader.ts`) uses three-gpu-pathtracer with a trimmed custom shader compiled once with final defines and adaptive tile size, to avoid GPU resets on weak (Mesa/Intel) drivers. Multi-material meshes are split per material group for the path tracer. Keep the photo look consistent with the realtime 3D view when changing lighting/materials.
 - Upper levels and ceilings hidden in the view still cast shadows via a separate shadow-only camera layer.
 

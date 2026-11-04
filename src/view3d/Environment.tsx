@@ -169,7 +169,7 @@ function groundMaterial(look: GroundLook | null, anisotropy: number): MeshStanda
 
 /** Terrain of the 3D view: visible patches and vertical faces, see model/terrain.ts. */
 export interface TerrainScene {
-  home: Pick<Home, 'terrain'>
+  home: Pick<Home, 'terrain' | 'rooms' | 'walls'>
   patches: TerrainPatch[]
   faces: TerrainFace[]
 }
@@ -208,7 +208,10 @@ export function Ground({ terrain, ground = DEFAULT_GROUND }: { terrain: TerrainS
     const tops = patches.map((patch) => {
       const own = !isDefaultSurface(patch.surface)
       const geometry = patchGeometry(home, patch)
-      return { geometry: own ? geometry : groundUv(geometry, GROUND_SIZE), surface: own ? patch.surface : null }
+      // The base ground lies just below the floors of the lowest level: as a shadow caster it
+      // would cover them with shadow acne. It only needs to cast shadows into basements below it.
+      const castShadow = patch.area !== null || patch.houseHoles.length > 0
+      return { geometry: own ? geometry : groundUv(geometry, GROUND_SIZE), surface: own ? patch.surface : null, castShadow }
     })
     const byArea = new Map<number | null, TerrainFace[]>()
     for (const face of faces) byArea.set(face.area, [...(byArea.get(face.area) ?? []), face])
@@ -219,12 +222,10 @@ export function Ground({ terrain, ground = DEFAULT_GROUND }: { terrain: TerrainS
     return { tops, edges }
   }, [terrain])
   useEffect(() => () => [...meshes.tops, ...meshes.edges].forEach((m) => m.geometry.dispose()), [meshes])
-  // A flat ground without holes casts no shadow (it would only shadow itself)
-  const castShadow = terrain.patches.length > 1 || terrain.patches.some((p) => p.houseHoles.length > 0)
   return (
     <group rotation-x={-Math.PI / 2} position-y={-0.5}>
       {meshes.tops.map((top, i) => (
-        <mesh key={i} geometry={top.geometry} material={top.surface ? surfaceMaterial(top.surface, LAWN_COLOR) : material} receiveShadow castShadow={castShadow} />
+        <mesh key={i} geometry={top.geometry} material={top.surface ? surfaceMaterial(top.surface, LAWN_COLOR) : material} receiveShadow castShadow={top.castShadow} />
       ))}
       {meshes.edges.map((edge, i) => (
         <mesh key={`edge${i}`} geometry={edge.geometry} material={surfaceMaterial(edge.surface, ROCK_COLOR)} receiveShadow castShadow />

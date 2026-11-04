@@ -90,6 +90,30 @@ describe('terrainPatches', () => {
     expect(front.reduce((sum, f) => sum + Math.abs(f.b[0] - f.a[0]), 0)).toBeCloseTo(3000 - 600, 0)
   })
 
+  it('schließt den Rasen an einem Raum ohne Wände mit einer Felswand bis zu dessen Boden ab', () => {
+    const { home } = hillside()
+    const faces = terrainFaces(home, terrainPatches(home))
+    // Rear edge (y = 600) and sides (x = 0, x = 600) of the garage within the lawn
+    const along = (test: (f: (typeof faces)[number]) => boolean) => faces.filter(test).reduce((sum, f) => sum + Math.hypot(f.b[0] - f.a[0], f.b[1] - f.a[1]), 0)
+    expect(along((f) => f.a[1] === 600 && f.b[1] === 600)).toBeCloseTo(600, 0)
+    expect(along((f) => f.a[0] === 0 && f.b[0] === 0)).toBeCloseTo(300, 0)
+    expect(along((f) => f.a[0] === 600 && f.b[0] === 600)).toBeCloseTo(300, 0)
+  })
+
+  it('baut entlang der Wände des Hauses keine Felswand', () => {
+    const { home, ground } = hillside()
+    const corners = square(0, 0, 600)
+    corners.forEach(([x, y], i) => {
+      const [xEnd, yEnd] = corners[(i + 1) % 4]
+      home.walls.push({ id: `w${i}`, xStart: x, yStart: y, xEnd, yEnd, wallAtStart: `w${(i + 3) % 4}`, wallAtEnd: `w${(i + 1) % 4}`, thickness: 20, height: null, level: ground })
+    })
+    const faces = terrainFaces(home, terrainPatches(home))
+    for (const face of faces) {
+      const mid = [(face.a[0] + face.b[0]) / 2, (face.a[1] + face.b[1]) / 2]
+      expect(mid[0] > -20 && mid[0] < 620 && mid[1] > 290 && mid[1] < 620).toBe(false)
+    }
+  })
+
   it('folgt der Höhe der Ebene', () => {
     const { home, upper } = hillside()
     applyCommand(home, { type: 'updateLevel', change: { id: upper, elevation: 320 } })

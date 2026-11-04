@@ -1,7 +1,9 @@
+import type { MultiPolygon } from 'polygon-clipping'
 import { BufferAttribute, BufferGeometry, Float32BufferAttribute, Path, Shape, ShapeGeometry, Vector2 } from 'three'
+import { clipping } from '../model/clipping'
 import type { Point } from '../model/geometry'
 import type { Home, Surface } from '../model/home'
-import { densify, patchHeight, type TerrainFace, type TerrainPatch } from '../model/terrain'
+import { closedRing, densify, patchHeight, TERRAIN_EXTENT, type TerrainFace, type TerrainPatch } from '../model/terrain'
 
 /**
  * Meshes of the terrain in the local frame of the ground: x = plan x, y = −plan y, z = height,
@@ -19,11 +21,49 @@ export const DEFAULT_ROCK: Surface = {
 
 const toVectors = (ring: Point[]) => ring.map(([x, y]) => new Vector2(x, -y))
 
+/** Size in cm of the tiles the terrain is cut into around the house and the terrain areas. */
+const TILE = 1000
+/** Margin in cm around the house and the terrain areas that is still cut into tiles. */
+const TILE_MARGIN = 2000
+
+/**
+ * The polygons cut into tiles around the house and the terrain areas. Triangulated as a whole, the
+ * base ground (kilometres wide, with holes) yields long thin triangles whose interpolated depth is
+ * too imprecise for floors lying just above it: the lawn then shows through the floors of the
+ * lowest level. Far from the house large triangles remain.
+ */
+function tiled(home: Pick<Home, 'terrain' | 'rooms' | 'walls'>, polygons: MultiPolygon): MultiPolygon {
+  const points: Point[] = [
+    ...home.terrain.flatMap((a) => a.points),
+    ...home.rooms.flatMap((r) => r.points),
+    ...home.walls.flatMap((w): Point[] => [[w.xStart, w.yStart], [w.xEnd, w.yEnd]]),
+  ]
+  if (points.length === 0) return polygons
+  const clamp = (v: number) => Math.max(-TERRAIN_EXTENT, Math.min(TERRAIN_EXTENT, v))
+  const snap = (v: number, up: boolean) => clamp((up ? Math.ceil(v / TILE) : Math.floor(v / TILE)) * TILE)
+  const minX = snap(Math.min(...points.map((p) => p[0])) - TILE_MARGIN, false)
+  const maxX = snap(Math.max(...points.map((p) => p[0])) + TILE_MARGIN, true)
+  const minY = snap(Math.min(...points.map((p) => p[1])) - TILE_MARGIN, false)
+  const maxY = snap(Math.max(...points.map((p) => p[1])) + TILE_MARGIN, true)
+  const rect = (x0: number, y0: number, x1: number, y1: number): MultiPolygon => [[closedRing([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])]]
+  try {
+    const result: MultiPolygon = [...clipping.difference(polygons, rect(minX, minY, maxX, maxY))]
+    const inner = clipping.intersection(polygons, rect(minX, minY, maxX, maxY))
+    if (inner.length === 0) return result
+    for (let x = minX; x < maxX; x += TILE) {
+      for (let y = minY; y < maxY; y += TILE) result.push(...clipping.intersection(inner, rect(x, y, x + TILE, y + TILE)))
+    }
+    return result
+  } catch {
+    return polygons
+  }
+}
+
 /** Top surface of a patch: flat at its height, or a slope whose vertices follow the terrain. */
-export function patchGeometry(home: Pick<Home, 'terrain'>, patch: TerrainPatch): BufferGeometry {
+export function patchGeometry(home: Pick<Home, 'terrain' | 'rooms' | 'walls'>, patch: TerrainPatch): BufferGeometry {
   const slope = patch.kind === 'slope'
   const ring = (points: Point[]) => toVectors(slope ? densify(points.slice(0, -1)) : points.slice(0, -1))
-  const shapes = patch.polygons.map(([outer, ...inner]) => {
+  const shapes = tiled(home, patch.polygons).map(([outer, ...inner]) => {
     const shape = new Shape(ring(outer as Point[]))
     shape.holes = inner.map((hole) => new Path(ring(hole as Point[])))
     return shape

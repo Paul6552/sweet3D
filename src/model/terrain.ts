@@ -141,23 +141,32 @@ export function areaFootprint(terrain: Terrain, index: number, reach = slopeReac
   return reach > 0 ? bufferPolygon(area.points, reach) : [[closedRing(area.points)]]
 }
 
-/**
- * Union of the outlines of rooms and walls of all visible levels whose floor lies below
- * {@code height}: there the house replaces the terrain (holes like Sweet Home 3D shows above
- * basements). Empty if no such level exists.
- */
-export function houseFootprint(home: Pick<Home, 'levels' | 'selectedLevel' | 'rooms' | 'walls'>, height: number): MultiPolygon {
-  const below = new Set(
+/** Parts of the house that replace the terrain below some height (see {@link houseFootprint}). */
+export interface HouseCut {
+  /** Union of the outlines of rooms and walls. */
+  footprint: MultiPolygon
+  /** Outlines of the walls only: they hold the terrain at the edge of the cut. */
+  walls: MultiPolygon
+  /** Room floors with their level's elevation, for faces down to rooms without walls. */
+  floors: { points: Point[]; elevation: number }[]
+}
+
+function houseCut(home: Pick<Home, 'levels' | 'selectedLevel' | 'rooms' | 'walls'>, height: number): HouseCut {
+  const elevations = new Map(
     visibleLevels(home as Home)
       .filter((l) => (l?.elevation ?? 0) < height)
-      .map((l) => l?.id ?? null),
+      .map((l) => [l?.id ?? null, l?.elevation ?? 0]),
   )
-  if (below.size === 0) return []
-  const polygons: Polygon[] = []
-  for (const room of home.rooms) if (below.has(room.level) && room.points.length >= 3) polygons.push([closedRing(room.points)])
-  const walls = home.walls.filter((w) => below.has(w.level))
+  if (elevations.size === 0) return { footprint: [], walls: [], floors: [] }
+  const floors = home.rooms.filter((r) => elevations.has(r.level) && r.points.length >= 3).map((r) => ({ points: r.points, elevation: elevations.get(r.level)! }))
+  const walls = home.walls.filter((w) => elevations.has(w.level))
   const wallsById = new Map(walls.map((w) => [w.id, w]))
-  for (const wall of walls) polygons.push([closedRing(wallPolygon(wall, wallsById))])
+  const wallPolygons: Polygon[] = walls.map((wall) => [closedRing(wallPolygon(wall, wallsById))])
+  const polygons: Polygon[] = [...floors.map((f): Polygon => [closedRing(f.points)]), ...wallPolygons]
+  return { footprint: union(polygons), walls: union(wallPolygons), floors }
+}
+
+function union(polygons: Polygon[]): MultiPolygon {
   if (polygons.length === 0) return []
   try {
     return clipping.union(polygons[0], ...polygons.slice(1))
@@ -165,6 +174,15 @@ export function houseFootprint(home: Pick<Home, 'levels' | 'selectedLevel' | 'ro
     // Rather one hole per outline (overlaps then twice) than none
     return polygons
   }
+}
+
+/**
+ * Union of the outlines of rooms and walls of all visible levels whose floor lies below
+ * {@code height}: there the house replaces the terrain (holes like Sweet Home 3D shows above
+ * basements). Empty if no such level exists.
+ */
+export function houseFootprint(home: Pick<Home, 'levels' | 'selectedLevel' | 'rooms' | 'walls'>, height: number): MultiPolygon {
+  return houseCut(home, height).footprint
 }
 
 /** Visible part of the terrain with one height rule: the base ground, the top of an area or its slope. */
@@ -175,8 +193,12 @@ export interface TerrainPatch {
   polygons: MultiPolygon
   /** Height of the flat part (0 for the base ground). */
   elevation: number
-  /** Parts of the house cut out of this patch; no faces are built along them. */
+  /** Parts of the house cut out of this patch. */
   houseHoles: MultiPolygon
+  /** Walls among them: no faces are built along them, the walls hold the terrain. */
+  houseWalls: MultiPolygon
+  /** Room floors among them; faces along rooms without walls reach down to their floor. */
+  houseFloors: HouseCut['floors']
   surface: Surface | null
 }
 
@@ -194,6 +216,10 @@ function difference(a: MultiPolygon, ...b: MultiPolygon[]): MultiPolygon {
 export function patchHeight(home: Pick<Home, 'terrain'>, patch: Pick<TerrainPatch, 'area' | 'kind' | 'elevation'>, point: Point): number {
   if (patch.kind === 'flat') return patch.elevation
   return terrainHeightAt(home.terrain, point, (patch.area ?? -1) + 1)
+}
+
+function cutFields(cut: HouseCut): Pick<TerrainPatch, 'houseHoles' | 'houseWalls' | 'houseFloors'> {
+  return { houseHoles: cut.footprint, houseWalls: cut.walls, houseFloors: cut.floors }
 }
 
 function ringsOf(polygons: MultiPolygon): Point[][] {
@@ -215,23 +241,23 @@ export function terrainPatches(home: Pick<Home, 'levels' | 'selectedLevel' | 'ro
     const reach = slopeReach(terrain, i)
     const footprint = areaFootprint(terrain, i, reach)
     const outline: MultiPolygon = [[closedRing(area.points)]]
-    const houseTop = houseFootprint(home, area.elevation)
-    const flat = difference(outline, ...covered, houseTop)
+    const houseTop = houseCut(home, area.elevation)
+    const flat = difference(outline, ...covered, houseTop.footprint)
     const surface = area.surface ?? null
-    if (flat.length > 0) patches.push({ area: i, kind: 'flat', polygons: flat, elevation: area.elevation, houseHoles: houseTop, surface })
+    if (flat.length > 0) patches.push({ area: i, kind: 'flat', polygons: flat, elevation: area.elevation, ...cutFields(houseTop), surface })
     if (reach > 0) {
       const band = difference(footprint, outline, ...covered)
       // The house is cut out where its floor lies below the highest point of the slope
       const highest = Math.max(area.elevation, ...ringsOf(band).flat().map((p) => terrainHeightAt(terrain, p, i)))
-      const houseSlope = houseFootprint(home, highest)
-      const slope = difference(band, houseSlope)
-      if (slope.length > 0) patches.push({ area: i, kind: 'slope', polygons: slope, elevation: area.elevation, houseHoles: houseSlope, surface })
+      const houseSlope = houseCut(home, highest)
+      const slope = difference(band, houseSlope.footprint)
+      if (slope.length > 0) patches.push({ area: i, kind: 'slope', polygons: slope, elevation: area.elevation, ...cutFields(houseSlope), surface })
     }
     covered.push(footprint)
   }
   const square: MultiPolygon = [[closedRing([[-TERRAIN_EXTENT, -TERRAIN_EXTENT], [TERRAIN_EXTENT, -TERRAIN_EXTENT], [TERRAIN_EXTENT, TERRAIN_EXTENT], [-TERRAIN_EXTENT, TERRAIN_EXTENT]])]]
-  const houseBase = houseFootprint(home, 0)
-  patches.push({ area: null, kind: 'flat', polygons: difference(square, ...covered, houseBase), elevation: 0, houseHoles: houseBase, surface: null })
+  const houseBase = houseCut(home, 0)
+  patches.push({ area: null, kind: 'flat', polygons: difference(square, ...covered, houseBase.footprint), elevation: 0, ...cutFields(houseBase), surface: null })
   return patches.reverse()
 }
 
@@ -249,8 +275,9 @@ export interface TerrainFace {
 
 /**
  * Vertical faces along the edges of the patches, from the patch down to the lower terrain next to
- * it. Edges along the house get none (its walls hold the terrain), nor edges where the terrain
- * continues at the same height (e.g. into a slope).
+ * it. Edges along walls of the house get none (the walls hold the terrain); along rooms without
+ * walls (e.g. a driveway cut into a terrace) the face reaches down to the room's floor. Edges where
+ * the terrain continues at the same height (e.g. into a slope) get none either.
  */
 export function terrainFaces(home: Pick<Home, 'terrain'>, patches: TerrainPatch[]): TerrainFace[] {
   const faces: TerrainFace[] = []
@@ -269,12 +296,17 @@ export function terrainFaces(home: Pick<Home, 'terrain'>, patches: TerrainPatch[
         const insideLeft = pointInMultiPolygon(side(1), patch.polygons)
         const out = insideLeft ? -1 : 1
         if (pointInMultiPolygon(side(out), patch.polygons) || !pointInMultiPolygon(side(-out), patch.polygons)) continue
-        if (pointInMultiPolygon(side(out), patch.houseHoles)) continue
+        const outside = side(out)
+        let floor = Infinity
+        if (pointInMultiPolygon(outside, patch.houseHoles)) {
+          if (pointInMultiPolygon(outside, patch.houseWalls)) continue
+          for (const room of patch.houseFloors) if (room.elevation < floor && pointInPolygon(outside, room.points)) floor = room.elevation
+        }
         const beside = (p: Point): Point => [p[0] + normal[0] * SIDE_OFFSET * out, p[1] + normal[1] * SIDE_OFFSET * out]
         const topA = patchHeight(home, patch, a)
         const topB = patchHeight(home, patch, b)
-        const lowA = terrainHeightAt(terrain, beside(a))
-        const lowB = terrainHeightAt(terrain, beside(b))
+        const lowA = Math.min(floor, terrainHeightAt(terrain, beside(a)))
+        const lowB = Math.min(floor, terrainHeightAt(terrain, beside(b)))
         if (topA - lowA <= FACE_THRESHOLD && topB - lowB <= FACE_THRESHOLD) continue
         // The face of the base ground down into a lowered area belongs to that area
         const area = patch.area ?? topAreaAt(home.terrain, beside(mid))

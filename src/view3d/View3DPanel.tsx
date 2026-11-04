@@ -27,7 +27,7 @@ import { openEnvironmentDialog } from '../dialogs/dialogStore'
 import { dispatch, useEditorStore } from '../store/editorStore'
 import { AerialCamera, ObserverCameraRig, type SceneBounds } from './cameras'
 import { AerialGround, Ground, Sky, type TerrainScene } from './Environment'
-import { terrainFaces, terrainPatches } from '../model/terrain'
+import { areaBottom, areaTop, terrainFaces, terrainPatches } from '../model/terrain'
 import { type Daylight, daylight } from './sky'
 import { sunDirection, sunPosition } from './sun'
 import { SunPopover } from './SunPopover'
@@ -52,7 +52,7 @@ function sceneBounds(home: Home, allLevels = false): SceneBounds {
   // Dächer ragen über die Ebenen hinaus
   const roofTops = home.roofs.filter((r) => visible.has(r.level)).map((r) => levelElevation(home, r.level) + rawRoofModel(home, r).ridge)
   // Terrain areas (terraces, rock faces) also cast and receive shadows
-  const terrainHeights = (home.terrain ?? []).map((a) => a.elevation)
+  const terrainHeights = (home.terrain ?? []).filter((a) => !a.drape).flatMap((a) => [areaTop(a), areaBottom(a)])
   const top = Math.max(...levels.map((l) => (l ? l.elevation + l.height : home.wallHeight)), ...roofTops, ...terrainHeights)
   // Untergeschosse reichen unter das Gelände
   const bottom = Math.min(0, ...levels.map((l) => l?.elevation ?? 0), ...terrainHeights)

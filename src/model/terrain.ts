@@ -1,14 +1,15 @@
 import type { MultiPolygon, Polygon, Ring } from 'polygon-clipping'
 import { clipping } from './clipping'
-import { distanceToSegment, pointInPolygon, wallPolygon, type Point } from './geometry'
+import { pointInPolygon, projectOnSegment, wallPolygon, type Point } from './geometry'
 import type { Home, Surface, TerrainArea } from './home'
 import { visibleLevels } from './levels'
 
 /**
- * Terrain made of flat areas at their own height (terraces). The terrain is flat at height 0
- * except where areas lie; later areas take precedence over earlier ones. An area with a vertical
- * edge ends in a rock face or retaining wall, one with a slope edge runs down (or up) to the
- * terrain around it outside its outline.
+ * Terrain made of areas at their own height (terraces) or rising as tilted planes (ramps). The
+ * terrain is flat at height 0 except where areas lie; later areas take precedence over earlier
+ * ones. An area with a vertical edge ends in a rock face or retaining wall, one with a slope edge
+ * runs down (or up) to the terrain around it outside its outline. An area that follows the terrain
+ * (drape) changes no heights and only lays its surface on what lies below it.
  *
  * All functions are pure; the 3D view builds its meshes from {@link terrainPatches} and
  * {@link terrainFaces}.
@@ -31,7 +32,8 @@ const SIDE_OFFSET = 0.5
 
 const CIRCLE_SEGMENTS = 16
 
-type Terrain = Pick<TerrainArea, 'points' | 'elevation' | 'edge' | 'slopeAngle'>[]
+type Terrain = Pick<TerrainArea, 'points' | 'elevation' | 'edge' | 'slopeAngle' | 'rampAngle' | 'rampLow' | 'drape'>[]
+type AreaShape = Pick<TerrainArea, 'points' | 'elevation' | 'rampAngle' | 'rampLow'>
 
 export function closedRing(points: Point[]): Ring {
   const [first, last] = [points[0], points[points.length - 1]]
@@ -42,19 +44,68 @@ export function pointInMultiPolygon(point: Point, polygons: MultiPolygon): boole
   return polygons.some(([outer, ...holes]) => pointInPolygon(point, outer as Point[]) && !holes.some((hole) => pointInPolygon(point, hole as Point[])))
 }
 
-function distanceToOutline(point: Point, outline: Point[]): number {
-  let best = Infinity
-  for (let i = 0; i < outline.length; i++) best = Math.min(best, distanceToSegment(point, outline[i], outline[(i + 1) % outline.length]))
+/** Point of the outline closest to {@code point} and its distance. */
+function nearestOnOutline(point: Point, outline: Point[]): { point: Point; distance: number } {
+  let best = { point: outline[0], distance: Infinity }
+  for (let i = 0; i < outline.length; i++) {
+    const nearest = projectOnSegment(point, outline[i], outline[(i + 1) % outline.length]).point
+    const distance = Math.hypot(point[0] - nearest[0], point[1] - nearest[1])
+    if (distance < best.distance) best = { point: nearest, distance }
+  }
   return best
+}
+
+export function isRamp(area: Pick<TerrainArea, 'rampAngle'>): boolean {
+  return area.rampAngle !== null && area.rampAngle !== undefined
+}
+
+/** Range of the outline along the direction of a ramp. */
+export function rampExtent(points: Point[], angle: number): { min: number; max: number } {
+  const along = points.map(([x, y]) => x * Math.cos(angle) + y * Math.sin(angle))
+  return { min: Math.min(...along), max: Math.max(...along) }
+}
+
+/**
+ * Height of an area at a point of its outline or inside it: constant for a flat area, for a ramp
+ * linear from its lowest to its highest point along the direction of the ramp.
+ */
+export function rampHeight(area: AreaShape, [x, y]: Point): number {
+  if (!isRamp(area)) return area.elevation
+  const angle = area.rampAngle!
+  const { min, max } = rampExtent(area.points, angle)
+  if (max <= min) return area.elevation
+  const t = (x * Math.cos(angle) + y * Math.sin(angle) - min) / (max - min)
+  const low = area.rampLow ?? 0
+  return low + (area.elevation - low) * Math.max(0, Math.min(1, t))
+}
+
+/** Highest point of an area. */
+export function areaTop(area: AreaShape): number {
+  return isRamp(area) ? Math.max(area.elevation, area.rampLow ?? 0) : area.elevation
+}
+
+/** Lowest point of an area. */
+export function areaBottom(area: AreaShape): number {
+  return isRamp(area) ? Math.min(area.elevation, area.rampLow ?? 0) : area.elevation
+}
+
+/** Direction of a new ramp: the first edge drawn is its foot, the area rises into its interior. */
+export function defaultRampAngle(points: Point[]): number {
+  const [a, b] = points
+  const normal = Math.atan2(b[0] - a[0], -(b[1] - a[1]))
+  const beside: Point = [(a[0] + b[0]) / 2 + Math.cos(normal) * SIDE_OFFSET, (a[1] + b[1]) / 2 + Math.sin(normal) * SIDE_OFFSET]
+  return pointInPolygon(beside, points) ? normal : normal + Math.PI
 }
 
 /** Height of the terrain at {@code point} after applying {@code area} on top of {@code under}. */
 function areaHeight(area: Terrain[number], point: Point, under: number): number {
-  if (area.points.length < 3) return under
-  if (pointInPolygon(point, area.points)) return area.elevation
+  if (area.points.length < 3 || area.drape) return under
+  if (pointInPolygon(point, area.points)) return rampHeight(area, point)
   if (area.edge !== 'slope') return under
-  const rise = distanceToOutline(point, area.points) * Math.tan(area.slopeAngle)
-  return area.elevation > under ? Math.max(under, area.elevation - rise) : Math.min(under, area.elevation + rise)
+  const nearest = nearestOnOutline(point, area.points)
+  const edge = rampHeight(area, nearest.point)
+  const rise = nearest.distance * Math.tan(area.slopeAngle)
+  return edge > under ? Math.max(under, edge - rise) : Math.min(under, edge + rise)
 }
 
 /** Height of the terrain at a plan point; only the first {@code count} areas are considered. */
@@ -90,7 +141,7 @@ function around([x, y]: Point, distance: number): Point[] {
  */
 export function slopeReach(terrain: Terrain, index: number): number {
   const area = terrain[index]
-  if (area.edge !== 'slope' || area.points.length < 3) return 0
+  if (area.edge !== 'slope' || area.points.length < 3 || area.drape) return 0
   const tan = Math.tan(area.slopeAngle)
   if (!(tan > 0)) return 0
   const samples = densify(area.points)
@@ -100,7 +151,7 @@ export function slopeReach(terrain: Terrain, index: number): number {
     for (const sample of samples) {
       for (const point of [sample, ...around(sample, reach + SIDE_OFFSET)]) {
         if (pointInPolygon(point, area.points)) continue
-        next = Math.max(next, Math.abs(area.elevation - terrainHeightAt(terrain, point, index)) / tan)
+        next = Math.max(next, Math.abs(rampHeight(area, sample) - terrainHeightAt(terrain, point, index)) / tan)
       }
     }
     if (next <= reach + 1) return Math.max(reach, next)
@@ -189,9 +240,9 @@ export function houseFootprint(home: Pick<Home, 'levels' | 'selectedLevel' | 'ro
 export interface TerrainPatch {
   /** Index of the area in {@code home.terrain}, {@code null} for the base ground. */
   area: number | null
-  kind: 'flat' | 'slope'
+  kind: 'flat' | 'ramp' | 'slope'
   polygons: MultiPolygon
-  /** Height of the flat part (0 for the base ground). */
+  /** Height of the flat part (0 for the base ground), of a ramp its upper end. */
   elevation: number
   /** Parts of the house cut out of this patch. */
   houseHoles: MultiPolygon
@@ -200,6 +251,14 @@ export interface TerrainPatch {
   /** Room floors among them; faces along rooms without walls reach down to their floor. */
   houseFloors: HouseCut['floors']
   surface: Surface | null
+}
+
+function intersection(a: MultiPolygon, b: MultiPolygon): MultiPolygon {
+  try {
+    return clipping.intersection(a, b)
+  } catch {
+    return []
+  }
 }
 
 function difference(a: MultiPolygon, ...b: MultiPolygon[]): MultiPolygon {
@@ -215,6 +274,8 @@ function difference(a: MultiPolygon, ...b: MultiPolygon[]): MultiPolygon {
 /** Height of a point of a patch: the terrain up to and including its area. */
 export function patchHeight(home: Pick<Home, 'terrain'>, patch: Pick<TerrainPatch, 'area' | 'kind' | 'elevation'>, point: Point): number {
   if (patch.kind === 'flat') return patch.elevation
+  // Directly from the area: points on its outline count as neither inside nor outside
+  if (patch.kind === 'ramp') return rampHeight(home.terrain[patch.area!], point)
   return terrainHeightAt(home.terrain, point, (patch.area ?? -1) + 1)
 }
 
@@ -237,18 +298,19 @@ export function terrainPatches(home: Pick<Home, 'levels' | 'selectedLevel' | 'ro
   const covered: MultiPolygon[] = []
   for (let i = terrain.length - 1; i >= 0; i--) {
     const area = terrain[i]
-    if (area.points.length < 3) continue
+    if (area.points.length < 3 || area.drape) continue
     const reach = slopeReach(terrain, i)
     const footprint = areaFootprint(terrain, i, reach)
     const outline: MultiPolygon = [[closedRing(area.points)]]
-    const houseTop = houseCut(home, area.elevation)
+    const top = areaTop(area)
+    const houseTop = houseCut(home, top)
     const flat = difference(outline, ...covered, houseTop.footprint)
     const surface = area.surface ?? null
-    if (flat.length > 0) patches.push({ area: i, kind: 'flat', polygons: flat, elevation: area.elevation, ...cutFields(houseTop), surface })
+    if (flat.length > 0) patches.push({ area: i, kind: isRamp(area) ? 'ramp' : 'flat', polygons: flat, elevation: area.elevation, ...cutFields(houseTop), surface })
     if (reach > 0) {
       const band = difference(footprint, outline, ...covered)
       // The house is cut out where its floor lies below the highest point of the slope
-      const highest = Math.max(area.elevation, ...ringsOf(band).flat().map((p) => terrainHeightAt(terrain, p, i)))
+      const highest = Math.max(top, ...ringsOf(band).flat().map((p) => terrainHeightAt(terrain, p, i)))
       const houseSlope = houseCut(home, highest)
       const slope = difference(band, houseSlope.footprint)
       if (slope.length > 0) patches.push({ area: i, kind: 'slope', polygons: slope, elevation: area.elevation, ...cutFields(houseSlope), surface })
@@ -258,7 +320,27 @@ export function terrainPatches(home: Pick<Home, 'levels' | 'selectedLevel' | 'ro
   const square: MultiPolygon = [[closedRing([[-TERRAIN_EXTENT, -TERRAIN_EXTENT], [TERRAIN_EXTENT, -TERRAIN_EXTENT], [TERRAIN_EXTENT, TERRAIN_EXTENT], [-TERRAIN_EXTENT, TERRAIN_EXTENT]])]]
   const houseBase = houseCut(home, 0)
   patches.push({ area: null, kind: 'flat', polygons: difference(square, ...covered, houseBase.footprint), elevation: 0, ...cutFields(houseBase), surface: null })
-  return patches.reverse()
+  return drapedPatches(terrain, patches.reverse())
+}
+
+/**
+ * Lays the surfaces of the areas that follow the terrain on the patches below them. Each patch is
+ * split at the outline and keeps its height rule, so the surface lies exactly on the terrain, also
+ * across kinks; there is no second mesh that could flicker with it. Later areas stay on top.
+ */
+function drapedPatches(terrain: TerrainArea[], patches: TerrainPatch[]): TerrainPatch[] {
+  return terrain.reduce((result, area, index) => {
+    const surface = area.surface
+    if (!area.drape || area.points.length < 3 || !surface || (surface.color == null && !surface.texture)) return result
+    const outline: MultiPolygon = [[closedRing(area.points)]]
+    return result.flatMap((patch) => {
+      if (patch.area !== null && patch.area > index) return [patch]
+      const inside = intersection(patch.polygons, outline)
+      if (inside.length === 0) return [patch]
+      const outside = difference(patch.polygons, outline)
+      return [...(outside.length > 0 ? [{ ...patch, polygons: outside }] : []), { ...patch, polygons: inside, surface }]
+    })
+  }, patches)
 }
 
 /** Vertical face where a patch ends higher than the terrain next to it (rock face, retaining wall). */
@@ -302,6 +384,9 @@ export function terrainFaces(home: Pick<Home, 'terrain'>, patches: TerrainPatch[
           if (pointInMultiPolygon(outside, patch.houseWalls)) continue
           for (const room of patch.houseFloors) if (room.elevation < floor && pointInPolygon(outside, room.points)) floor = room.elevation
         }
+        // The terrain continues here: the ends of the edge may lie on the outline of an area and
+        // read the terrain beside it, e.g. where a draped surface splits a patch
+        else if (Math.abs(patchHeight(home, patch, mid) - terrainHeightAt(terrain, outside)) <= FACE_THRESHOLD) continue
         const beside = (p: Point): Point => [p[0] + normal[0] * SIDE_OFFSET * out, p[1] + normal[1] * SIDE_OFFSET * out]
         const topA = patchHeight(home, patch, a)
         const topB = patchHeight(home, patch, b)
@@ -321,7 +406,7 @@ export function terrainFaces(home: Pick<Home, 'terrain'>, patches: TerrainPatch[
 export function topAreaAt(terrain: TerrainArea[], point: Point): number | null {
   for (let i = terrain.length - 1; i >= 0; i--) {
     const area = terrain[i]
-    if (area.points.length < 3) continue
+    if (area.points.length < 3 || area.drape) continue
     if (pointInPolygon(point, area.points)) return i
     if (area.edge === 'slope' && areaHeight(area, point, terrainHeightAt(terrain, point, i)) !== terrainHeightAt(terrain, point, i)) return i
   }

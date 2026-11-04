@@ -5,7 +5,7 @@ import { Layer, Stage } from 'react-konva'
 import { useTranslation } from 'react-i18next'
 import { CATALOG_PIECE_MIME, useCatalogStore } from '../catalog/catalogStore'
 import { applyCommand, type HomeCommand } from '../model/commands'
-import { dimensionLength, distance, distanceToSegment, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
+import { dimensionLength, distance, distanceToSegment, polygonCentroid, signedOffset, toPieceLocal, wallLength, type Point } from '../model/geometry'
 import { newId, type DimensionLine, type Home, type HomePiece, type ObserverCamera, type TerrainArea, type Wall } from '../model/home'
 import { DEFAULT_SLOPE_ANGLE } from '../model/terrain'
 import { homeOnLevel, levelBelow, levelElevation, onLevel } from '../model/levels'
@@ -187,6 +187,12 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
       const points = handle.kind === 'terrainPoint' ? area.points.map((p, i) => (i === index ? point : p)) : [...area.points.slice(0, index + 1), point, ...area.points.slice(index + 1)]
       return { type: 'updateTerrain', changes: [{ id: area.id, points }] }
     }
+    case 'terrainRamp': {
+      const { area } = handle
+      const [x, y] = polygonCentroid(area.points)
+      const angle = Math.atan2(current[1] - y, current[0] - x)
+      return { type: 'updateTerrain', changes: [{ id: area.id, rampAngle: normalizeAngle(magnetism ? snapAngle(angle) : angle) }] }
+    }
     case 'roomPoint':
     case 'roomMid': {
       const { room, index } = handle
@@ -239,6 +245,10 @@ function gestureLabel(preview: Home, gesture: Gesture): string | null {
       if (!line) return null
       return handle.kind === 'dimensionOffset' ? `${line.offset} cm` : `${round1(dimensionLength(line))} cm`
     }
+    if (handle.kind === 'terrainRamp') {
+      const angle = preview.terrain.find((a) => a.id === handle.area.id)?.rampAngle
+      return angle === null || angle === undefined ? null : `${degrees(angle)}°`
+    }
     if ('roof' in handle || 'area' in handle || 'room' in handle) return null
     const id = 'piece' in handle ? handle.piece.id : handle.wall.id
     const piece = preview.furniture.find((p) => p.id === id)
@@ -254,7 +264,7 @@ function gestureLabel(preview: Home, gesture: Gesture): string | null {
 }
 
 function cursorFor(handle: Handle | null, overItem: boolean): string {
-  if (handle?.kind === 'rotate') return 'grab'
+  if (handle?.kind === 'rotate' || handle?.kind === 'terrainRamp') return 'grab'
   if (handle?.kind === 'resize') return 'nwse-resize'
   if (handle) return 'crosshair'
   return overItem ? 'move' : 'default'

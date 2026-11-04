@@ -5,7 +5,9 @@ import { argbToCss } from '../model/colors'
 import { backgroundImageTransform, type BackgroundImage, type Compass, type DimensionLine, type Home, type HomePiece, type Label as HomeLabel, type ObserverCamera, type Roof, type TerrainArea, type Wall } from '../model/home'
 import { dimensionLength, dimensionOffsetPoints, labelCorners, pitchedSize, pointInPolygon, polygonArea, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { edgeProfile, GABLE, roofModels, type RoofModel } from '../model/roofs'
-import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS } from './hitTest'
+import { compassRadius, handlePoints, observerHandle, OBSERVER_RADIUS, rampArrow } from './hitTest'
+import { useTranslation } from 'react-i18next'
+import { isRamp } from '../model/terrain'
 import type { PlanView } from './planStore'
 import { useResolvedRef } from '../storage/contents'
 import { useImage } from './useImage'
@@ -70,10 +72,14 @@ const TERRAIN_INK_DARK = '#a5c977'
  * retaining wall) is drawn solid and thick, a slope dashed with ticks running down the slope.
  */
 const TerrainPlanShape = memo(function TerrainPlanShape({ area, scale, color, selected, selectedColor }: { area: TerrainArea; scale: number; color: string; selected: boolean; selectedColor: string }) {
+  const { t } = useTranslation()
   const [cx, cy] = polygonCentroid(area.points)
   const fontSize = 12 / scale
-  const slope = area.edge === 'slope'
-  const sign = area.elevation > 0 ? '+' : area.elevation < 0 ? '−' : '±'
+  const drape = area.drape === true
+  const slope = area.edge === 'slope' && !drape
+  const height = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : '±'}${Math.abs(Math.round(value))} cm`
+  const ramp = isRamp(area)
+  const arrow = ramp ? rampArrow(area) : null
   // Ticks every 60 px on screen, pointing down the slope (outwards when raised, inwards when lowered)
   const ticks: number[][] = []
   if (slope) {
@@ -107,16 +113,17 @@ const TerrainPlanShape = memo(function TerrainPlanShape({ area, scale, color, se
         closed
         fill={`${color}14`}
         stroke={stroke}
-        strokeWidth={(selected ? 3 : slope ? 1.2 : 2.5) / scale}
+        strokeWidth={(selected ? 3 : slope || drape ? 1.2 : 2.5) / scale}
         dash={slope ? [8 / scale, 4 / scale] : undefined}
       />
       {ticks.map((tick, i) => (
         <Line key={i} points={tick} stroke={stroke} strokeWidth={1 / scale} />
       ))}
+      {arrow && <Arrow points={flat(arrow)} stroke={stroke} fill={stroke} strokeWidth={1.5 / scale} pointerLength={9 / scale} pointerWidth={8 / scale} />}
       <Text
         x={cx}
         y={cy}
-        text={`${area.name ? `${area.name}\n` : ''}${sign}${Math.abs(Math.round(area.elevation))} cm`}
+        text={drape ? (area.name ?? t('terrain.shapes.drape')) : `${area.name ? `${area.name}\n` : ''}${ramp ? `${height(area.rampLow ?? 0)} … ${height(area.elevation)}` : height(area.elevation)}`}
         fontSize={fontSize}
         fill={color}
         align="center"
@@ -625,7 +632,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
           height={10 / scale}
           offsetX={5 / scale}
           offsetY={5 / scale}
-          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' || handle.kind === 'terrainMid' || handle.kind === 'roomMid' ? 5 / scale : 0}
+          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' || handle.kind === 'terrainMid' || handle.kind === 'terrainRamp' || handle.kind === 'roomMid' ? 5 / scale : 0}
           fill={theme.palette.background.paper}
           stroke={selectedColor}
           strokeWidth={2 / scale}

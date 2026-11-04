@@ -134,14 +134,15 @@ export function useSelectField<T, V extends string>(
   label: string,
   options: { value: V; label: string }[],
   get: (item: T) => V,
-  set: (change: Partial<T>, value: V) => void,
-): Field<T> {
+  set: (change: Partial<T>, value: V, item: T) => void,
+): Field<T> & { value: V | undefined } {
   const shared = sharedValue(items, get)
   const [value, setValue] = useState<V | undefined>(shared)
   return {
+    value,
     dirty: value !== shared,
     valid: true,
-    apply: (change) => set(change, value!),
+    apply: (change, item) => set(change, value!, item),
     node: (
       <TextField select size="small" label={label} value={value ?? ''} onChange={(e) => setValue(e.target.value as V)} slotProps={{ inputLabel: { shrink: true } }}>
         {options.map((option) => (

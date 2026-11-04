@@ -426,8 +426,9 @@ export function defaultEnvironment(): HomeEnvironment {
 export type TerrainEdge = 'wall' | 'slope'
 
 /**
- * Flat terrain area at its own height (terrace), e.g. the lawn behind a house built into a
- * hillside, a rock plateau or a driveway cut into the hill. Sweet Home 3D has no terrain, so this
+ * Terrain area at its own height (terrace), e.g. the lawn behind a house built into a hillside, a
+ * rock plateau or a driveway cut into the hill, or a tilted plane rising from a lower to an upper
+ * height (ramp). Sweet Home 3D has no terrain, so this
  * is stored as a home property in .sh3d files. Areas apply to all levels; later areas take
  * precedence over earlier ones where they overlap.
  */
@@ -436,13 +437,22 @@ export interface TerrainArea {
   name: string | null
   /** Outline in plan coordinates (cm). */
   points: [number, number][]
-  /** Absolute height of the area in cm, same reference as {@link Level.elevation}. */
+  /** Absolute height of the area in cm, same reference as {@link Level.elevation}; of a ramp its upper end. */
   elevation: number
   /** Level whose floor height the area follows (elevation is then kept equal to it), or null. */
   followLevel: string | null
   edge: TerrainEdge
   /** Angle of the slope for {@code edge: 'slope'} in radians. */
   slopeAngle: number
+  /** Plan direction in radians in which the area rises as a tilted plane (ramp); null or missing = flat. */
+  rampAngle?: number | null
+  /** Height in cm at the lower end of a ramp, default 0. */
+  rampLow?: number
+  /**
+   * The area follows the terrain below it: it changes no heights and only lays its surface on the
+   * earlier areas and the base ground (e.g. a road on a hillside).
+   */
+  drape?: boolean
   /** Surface of the area; default (null color and texture) = ground of the environment. */
   surface?: Surface
   /** Surface of vertical edges; default = rock. */

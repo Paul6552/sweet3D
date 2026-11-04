@@ -146,7 +146,7 @@ export async function importSh3d(data: Uint8Array, catalog: CatalogPiece[], text
   if (Array.isArray(terrain)) {
     home.terrain = terrain
       .filter((a) => a && typeof a.id === 'string' && Array.isArray(a.points) && a.points.length >= 3 && Number.isFinite(a.elevation))
-      .map((a) => ({ ...a, name: a.name ?? null, followLevel: a.followLevel ?? null, edge: a.edge === 'slope' ? 'slope' : 'wall', slopeAngle: Number.isFinite(a.slopeAngle) ? a.slopeAngle : DEFAULT_SLOPE_ANGLE }))
+      .map((a) => ({ ...a, name: a.name ?? null, followLevel: a.followLevel ?? null, edge: a.edge === 'slope' ? 'slope' : 'wall', slopeAngle: Number.isFinite(a.slopeAngle) ? a.slopeAngle : DEFAULT_SLOPE_ANGLE, rampAngle: Number.isFinite(a.rampAngle) ? a.rampAngle : null, rampLow: Number.isFinite(a.rampLow) ? a.rampLow : 0, drape: a.drape === true }))
   }
 
   // Texturen aus dem Katalog (auch importierten Bibliotheken) verweisen auf dessen Bilder, alle anderen werden übernommen

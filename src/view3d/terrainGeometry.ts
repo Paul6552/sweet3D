@@ -59,7 +59,7 @@ function tiled(home: Pick<Home, 'terrain' | 'rooms' | 'walls'>, polygons: MultiP
   }
 }
 
-/** Top surface of a patch: flat at its height, or a slope whose vertices follow the terrain. */
+/** Top surface of a patch: flat at its height, a tilted plane, or a slope whose vertices follow the terrain. */
 export function patchGeometry(home: Pick<Home, 'terrain' | 'rooms' | 'walls'>, patch: TerrainPatch): BufferGeometry {
   const slope = patch.kind === 'slope'
   const ring = (points: Point[]) => toVectors(slope ? densify(points.slice(0, -1)) : points.slice(0, -1))
@@ -79,7 +79,7 @@ export function patchGeometry(home: Pick<Home, 'terrain' | 'rooms' | 'walls'>, p
     uv[2 * i + 1] = y
   }
   geometry.setAttribute('uv', new BufferAttribute(uv, 2))
-  if (slope) geometry.computeVertexNormals()
+  if (patch.kind !== 'flat') geometry.computeVertexNormals()
   return geometry
 }
 

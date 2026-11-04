@@ -1,6 +1,7 @@
 import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Roof, Room, TerrainArea, Wall } from '../model/home'
-import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
+import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, polygonCentroid, wallPolygon, type Point } from '../model/geometry'
 import { rawRoofModel } from '../model/roofs'
+import { isRamp, rampExtent } from '../model/terrain'
 
 export type ItemKind = 'piece' | 'wall' | 'room' | 'roof' | 'dimensionLine' | 'label' | 'terrain'
 
@@ -25,6 +26,8 @@ export type Handle =
   | { kind: 'terrainPoint'; area: TerrainArea; index: number }
   /** Middle of edge {@code index} of a terrain area: dragging inserts a corner there. */
   | { kind: 'terrainMid'; area: TerrainArea; index: number }
+  /** Tip of the arrow of a ramp: dragging turns the direction in which it rises. */
+  | { kind: 'terrainRamp'; area: TerrainArea }
   /** Corner {@code index} of a room. */
   | { kind: 'roomPoint'; room: Room; index: number }
   /** Middle of edge {@code index} of a room: dragging inserts a corner there. */
@@ -80,6 +83,16 @@ export function hitItem(home: Home, point: Point, tolerance = 0): Hit | null {
   return null
 }
 
+/** Arrow of a ramp in the plan, running uphill through the middle of the area. */
+export function rampArrow(area: TerrainArea): [Point, Point] {
+  const angle = area.rampAngle ?? 0
+  const [x, y] = polygonCentroid(area.points)
+  const { min, max } = rampExtent(area.points, angle)
+  const half = (max - min) * 0.3
+  const [dx, dy] = [Math.cos(angle) * half, Math.sin(angle) * half]
+  return [[x - dx, y - dy], [x + dx, y + dy]]
+}
+
 /** Corner and edge middle handles of a polygon, like those of roofs. */
 function polygonHandles<T>(points: Point[], corner: (index: number) => T, middle: (index: number) => T): { handle: T; point: Point }[] {
   const n = points.length
@@ -118,7 +131,8 @@ export function handlePoints(home: Home, selection: string[]): { handle: Handle;
   }
   const area = home.terrain.find((a) => a.id === selection[0])
   if (area) {
-    return polygonHandles<Handle>(area.points, (index) => ({ kind: 'terrainPoint', area, index }), (index) => ({ kind: 'terrainMid', area, index }))
+    const corners = polygonHandles<Handle>(area.points, (index) => ({ kind: 'terrainPoint', area, index }), (index) => ({ kind: 'terrainMid', area, index }))
+    return isRamp(area) ? [{ handle: { kind: 'terrainRamp', area }, point: rampArrow(area)[1] }, ...corners] : corners
   }
   const room = home.rooms.find((r) => r.id === selection[0])
   if (room) {

@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import type { HomeCommand } from '../model/commands'
 import { dimensionLength } from '../model/geometry'
 import type { DimensionLine, HomePiece, Room, TerrainArea, Wall } from '../model/home'
+import { defaultRampAngle, isRamp } from '../model/terrain'
 import { useRoofFields } from './RoofFields'
 import { executeCommand, useEditorStore } from '../store/editorStore'
 import { collectChanges, DEFAULT_SURFACE, degrees, useCheckField, useNumberField, useSelectField, useSurfaceField, useTextField, show, wide } from './fields'
@@ -120,8 +121,25 @@ function useTerrainFields(areas: TerrainArea[]) {
   const allLevels = useEditorStore((s) => s.home!.levels)
   const levels = useMemo(() => allLevels.filter((l) => !l.roof), [allLevels])
   const name = useTextField(areas, t('furniture.name'), (a) => a.name, (c, v) => (c.name = v.trim() || null))
+  const shape = useSelectField(
+    areas,
+    t('terrain.shape'),
+    [
+      { value: 'flat' as const, label: t('terrain.shapes.flat') },
+      { value: 'ramp' as const, label: t('terrain.shapes.ramp') },
+      { value: 'drape' as const, label: t('terrain.shapes.drape') },
+    ],
+    (a) => (a.drape ? 'drape' : isRamp(a) ? 'ramp' : 'flat'),
+    (c, v, area) => {
+      c.drape = v === 'drape'
+      c.rampAngle = v === 'ramp' ? (area.rampAngle ?? defaultRampAngle(area.points)) : null
+      if (v === 'drape') c.followLevel = null
+    },
+  )
+  const ramp = shape.value === 'ramp'
+  const drape = shape.value === 'drape'
   // Applied in this order: a typed height stops following a level, a chosen level sets the height
-  const elevation = useNumberField(areas, t('terrain.elevation'), (a) => a.elevation, (c, v) => {
+  const elevation = useNumberField(areas, t(ramp ? 'terrain.elevationTop' : 'terrain.elevation'), (a) => a.elevation, (c, v) => {
     c.elevation = v!
     c.followLevel = null
   })
@@ -136,6 +154,7 @@ function useTerrainFields(areas: TerrainArea[]) {
       if (level) c.elevation = level.elevation
     },
   )
+  const rampLow = useNumberField(areas, t('terrain.rampLow'), (a) => a.rampLow ?? 0, (c, v) => (c.rampLow = v!))
   const edge = useSelectField(
     areas,
     t('terrain.edge'),
@@ -151,18 +170,19 @@ function useTerrainFields(areas: TerrainArea[]) {
     useSurfaceField(areas, t('terrain.surface'), (a) => a.surface ?? DEFAULT_SURFACE, (c, s) => (c.surface = s)),
     useSurfaceField(areas, t('terrain.edgeSurface'), (a) => a.edgeSurface ?? DEFAULT_SURFACE, (c, s) => (c.edgeSurface = s)),
   ]
-  const main = [elevation, follow, edge, slopeAngle]
+  const main = drape ? [shape] : [shape, elevation, ...(ramp ? [rampLow] : []), follow, edge, slopeAngle]
+  const shown = drape ? surfaces.slice(0, 1) : surfaces
   const node = (
     <Grid>
       <Box sx={{ gridColumn: '1 / -1' }}>{name.node}</Box>
       {show(main)}
       <Typography variant="body2" color="text.secondary" sx={{ gridColumn: '1 / -1' }}>
-        {t('terrain.hint')}
+        {t(drape ? 'terrain.drapeHint' : ramp ? 'terrain.rampHint' : 'terrain.hint')}
       </Typography>
-      {wide(surfaces)}
+      {wide(shown)}
     </Grid>
   )
-  return { fields: [name, ...main, ...surfaces], node }
+  return { fields: [name, ...main, ...shown], node }
 }
 
 /** Eigenschaften der ausgewählten Objekte; bei gemischter Auswahl je Art ein Abschnitt. */

@@ -625,7 +625,7 @@ export function PlanRenderer({ home, selection, view, width, height, preview, wa
           height={10 / scale}
           offsetX={5 / scale}
           offsetY={5 / scale}
-          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' || handle.kind === 'terrainMid' ? 5 / scale : 0}
+          cornerRadius={handle.kind === 'rotate' || handle.kind === 'roofMid' || handle.kind === 'terrainMid' || handle.kind === 'roomMid' ? 5 / scale : 0}
           fill={theme.palette.background.paper}
           stroke={selectedColor}
           strokeWidth={2 / scale}

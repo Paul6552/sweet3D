@@ -32,7 +32,7 @@ import { createWallCommand, DEFAULT_WALL_THICKNESS, moveWallEndCommand } from '.
 
 /** Laufende Mausaktion im Plan. */
 type Gesture =
-  | { kind: 'pan'; startX: number; startY: number; view: PlanView }
+  | { kind: 'pan'; startX: number; startY: number; view: PlanView; secondary?: boolean; moved?: boolean }
   | { kind: 'rubberBand'; start: Point; current: Point; base: string[] }
   | { kind: 'move'; start: Point; current: Point; ids: string[]; magnetism: boolean }
   | { kind: 'handle'; handle: Handle; current: Point; magnetism: boolean }
@@ -187,6 +187,21 @@ function gestureCommand(home: Home, gesture: Gesture, scale: number): HomeComman
       const points = handle.kind === 'terrainPoint' ? area.points.map((p, i) => (i === index ? point : p)) : [...area.points.slice(0, index + 1), point, ...area.points.slice(index + 1)]
       return { type: 'updateTerrain', changes: [{ id: area.id, points }] }
     }
+    case 'roomPoint':
+    case 'roomMid': {
+      const { room, index } = handle
+      if (handle.kind === 'roomMid') {
+        const a = room.points[index]
+        const b = room.points[(index + 1) % room.points.length]
+        if (distance(current, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) < DRAG_THRESHOLD_PX / scale) return null
+      }
+      // Snap to walls, other rooms and the room's own remaining corners, not to the dragged corner itself
+      const others = room.points.filter((_, i) => handle.kind === 'roomMid' || i !== index)
+      const candidates = [...roomSnapPoints({ ...home, rooms: home.rooms.filter((r) => r.id !== room.id) }), ...others]
+      const point = roundPoint(magnetism ? snapToPoints(current, candidates, SNAP_TOLERANCE_PX / scale) : current)
+      const points = handle.kind === 'roomPoint' ? room.points.map((p, i) => (i === index ? point : p)) : [...room.points.slice(0, index + 1), point, ...room.points.slice(index + 1)]
+      return { type: 'updateRooms', changes: [{ id: room.id, points }] }
+    }
     case 'wallStart':
     case 'wallEnd': {
       const { wall } = handle
@@ -224,7 +239,7 @@ function gestureLabel(preview: Home, gesture: Gesture): string | null {
       if (!line) return null
       return handle.kind === 'dimensionOffset' ? `${line.offset} cm` : `${round1(dimensionLength(line))} cm`
     }
-    if ('roof' in handle || 'area' in handle) return null
+    if ('roof' in handle || 'area' in handle || 'room' in handle) return null
     const id = 'piece' in handle ? handle.piece.id : handle.wall.id
     const piece = preview.furniture.find((p) => p.id === id)
     const wall = preview.walls.find((w) => w.id === id)
@@ -449,9 +464,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     containerRef.current!.focus()
     const point = toPlan(event.clientX, event.clientY)
     const magnet = magnetism !== event.altKey
-    if (event.button === 1 || (event.button === 0 && (mode === 'pan' || spaceHeld.current))) {
+    if (event.button === 1 || event.button === 2 || (event.button === 0 && (mode === 'pan' || spaceHeld.current))) {
       event.currentTarget.setPointerCapture(event.pointerId)
-      setGesture({ kind: 'pan', startX: event.clientX, startY: event.clientY, view })
+      // Right button pans as in the 3D view; without dragging it opens the context menu on release
+      setGesture({ kind: 'pan', startX: event.clientX, startY: event.clientY, view, secondary: event.button === 2 })
       return
     }
     if (event.button !== 0) return
@@ -550,8 +566,13 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       return
     }
     if (gesture.kind === 'pan') {
+      const dx = event.clientX - gesture.startX
+      const dy = event.clientY - gesture.startY
+      // Ignore small jitter so a right click still opens the context menu
+      if (gesture.secondary && !gesture.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+      if (!gesture.moved) setGesture({ ...gesture, moved: true })
       setCursorStyle('grabbing')
-      setView({ ...gesture.view, x: gesture.view.x + event.clientX - gesture.startX, y: gesture.view.y + event.clientY - gesture.startY })
+      setView({ ...gesture.view, x: gesture.view.x + dx, y: gesture.view.y + dy })
       return
     }
     if (gesture.kind === 'observer') {
@@ -577,9 +598,38 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
     )
   }
 
-  const onPointerUp = () => {
+  const openContextMenu = (clientX: number, clientY: number) => {
+    // Right click on a corner or edge of the selected roof: edge type or delete corner
+    const roof = selection.length === 1 ? home.roofs.find((r) => r.id === selection[0]) : undefined
+    if (!roof || mode !== 'select') return
+    const point = toPlan(clientX, clientY)
+    const tolerance = HANDLE_TOLERANCE_PX / scale
+    const corner = roof.points.findIndex((p) => distance(p, point) <= tolerance)
+    if (corner >= 0) {
+      setRoofMenu({ x: clientX, y: clientY, roofId: roof.id, kind: 'point', index: corner })
+      return
+    }
+    const n = roof.points.length
+    let best = -1
+    let bestDistance = tolerance * 2
+    roof.points.forEach((a, i) => {
+      const d = distanceToSegment(point, a, roof.points[(i + 1) % n])
+      if (d < bestDistance) {
+        best = i
+        bestDistance = d
+      }
+    })
+    if (best >= 0) setRoofMenu({ x: clientX, y: clientY, roofId: roof.id, kind: 'edge', index: best })
+  }
+
+  const onPointerUp = (event: React.PointerEvent) => {
     pressStart.current = null
     if (!gesture) return
+    if (gesture.kind === 'pan') {
+      if (gesture.secondary && !gesture.moved) openContextMenu(event.clientX, event.clientY)
+      setGesture(null)
+      return
+    }
     if (gesture.kind === 'rubberBand') {
       const ids = itemsInRect(home, gesture.start, gesture.current)
       if (ids.length > 0 || gesture.base.length > 0) dispatch({ type: 'select', ids: [...new Set([...gesture.base, ...ids])] })
@@ -719,28 +769,10 @@ export function PlanCanvas({ onStatus }: { onStatus: (status: { cursor: Point | 
       }}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => {
+        // The menu opens on pointer up (see onPointerUp) so right-dragging can pan the view
         e.preventDefault()
-        // Rechtsklick an einer Ecke oder Kante des ausgewählten Dachs: Kantentyp bzw. Ecke löschen
-        const roof = selection.length === 1 ? home.roofs.find((r) => r.id === selection[0]) : undefined
-        if (!roof || mode !== 'select') return
-        const point = toPlan(e.clientX, e.clientY)
-        const tolerance = HANDLE_TOLERANCE_PX / scale
-        const corner = roof.points.findIndex((p) => distance(p, point) <= tolerance)
-        if (corner >= 0) {
-          setRoofMenu({ x: e.clientX, y: e.clientY, roofId: roof.id, kind: 'point', index: corner })
-          return
-        }
-        const n = roof.points.length
-        let best = -1
-        let bestDistance = tolerance * 2
-        roof.points.forEach((a, i) => {
-          const d = distanceToSegment(point, a, roof.points[(i + 1) % n])
-          if (d < bestDistance) {
-            best = i
-            bestDistance = d
-          }
-        })
-        if (best >= 0) setRoofMenu({ x: e.clientX, y: e.clientY, roofId: roof.id, kind: 'edge', index: best })
+        // Keyboard-triggered context menu (button -1 / no preceding pointer down)
+        if (!gesture && e.button !== 2) openContextMenu(e.clientX, e.clientY)
       }}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes(CATALOG_PIECE_MIME)) {

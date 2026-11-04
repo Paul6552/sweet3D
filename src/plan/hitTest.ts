@@ -1,4 +1,4 @@
-import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Roof, TerrainArea, Wall } from '../model/home'
+import type { Compass, DimensionLine, Home, HomePiece, ObserverCamera, Roof, Room, TerrainArea, Wall } from '../model/home'
 import { dimensionOffsetPoints, distance, distanceToSegment, labelCorners, pieceCorners, pointInPolygon, wallPolygon, type Point } from '../model/geometry'
 import { rawRoofModel } from '../model/roofs'
 
@@ -25,6 +25,10 @@ export type Handle =
   | { kind: 'terrainPoint'; area: TerrainArea; index: number }
   /** Middle of edge {@code index} of a terrain area: dragging inserts a corner there. */
   | { kind: 'terrainMid'; area: TerrainArea; index: number }
+  /** Corner {@code index} of a room. */
+  | { kind: 'roomPoint'; room: Room; index: number }
+  /** Middle of edge {@code index} of a room: dragging inserts a corner there. */
+  | { kind: 'roomMid'; room: Room; index: number }
 
 /**
  * Trifft der Punkt das Dach? Nur am Überstand (zwischen Wandlinie und Traufe) und an First, Graten
@@ -115,6 +119,10 @@ export function handlePoints(home: Home, selection: string[]): { handle: Handle;
   const area = home.terrain.find((a) => a.id === selection[0])
   if (area) {
     return polygonHandles<Handle>(area.points, (index) => ({ kind: 'terrainPoint', area, index }), (index) => ({ kind: 'terrainMid', area, index }))
+  }
+  const room = home.rooms.find((r) => r.id === selection[0])
+  if (room) {
+    return polygonHandles<Handle>(room.points, (index) => ({ kind: 'roomPoint', room, index }), (index) => ({ kind: 'roomMid', room, index }))
   }
   const wall = home.walls.find((w) => w.id === selection[0])
   if (wall) {

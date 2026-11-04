@@ -8,7 +8,9 @@ import {
   CubeCamera,
   DataTexture,
   DirectionalLight,
+  LinearSRGBColorSpace,
   DoubleSide,
+  FloatType,
   HalfFloatType,
   type Material,
   Mesh,
@@ -19,17 +21,21 @@ import {
   PerspectiveCamera,
   type PixelFormat,
   PointLight,
+  RGBAFormat,
   Quaternion,
   type Scene,
+  type Texture,
   Scene as ThreeScene,
   ShaderMaterial,
   SRGBColorSpace,
+  UnsignedByteType,
   Vector3,
   WebGLCubeRenderTarget,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three'
-import { WebGLPathTracer } from 'three-gpu-pathtracer'
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js'
+import { DenoiseMaterial, WebGLPathTracer } from 'three-gpu-pathtracer'
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker'
 import { compileOnce, slimPathTracerShader } from './pathTracerShader'
 import { createSky, GROUND_BOUNCE } from './sky'
@@ -48,9 +54,9 @@ export const PHOTO_SIZES = [
   { label: 'Full HD', width: 1920, height: 1080 },
   { label: '4K', width: 3840, height: 2160 },
 ] as const
-export const SAMPLE_OPTIONS = [64, 256, 1024]
+export const SAMPLE_OPTIONS = [64, 256, 1024, 4096]
 /** i18n keys of the quality levels in {@link SAMPLE_OPTIONS}. */
-export const QUALITY_KEYS = ['photo.draft', 'photo.good', 'photo.best'] as const
+export const QUALITY_KEYS = ['photo.draft', 'photo.good', 'photo.best', 'photo.max'] as const
 /**
  * Target mean GPU time per tile. Drivers reset the GPU when a command blocks it for too long
  * (Intel i915 on Linux already after 640 ms) and the WebGL context is lost. The margin absorbs
@@ -67,6 +73,19 @@ const START_TILE_PIXELS = 64 * 64
 const GLASS_TINT = 0.15
 /** Color of the hidden ceilings and levels above, which reflect light into the room. */
 const CEILING = '#fafafa'
+
+/**
+ * Brightest single sample, relative to white after exposure. Rare paths that find a bright light
+ * (fireflies) would otherwise leave white specks that take thousands of samples to average out;
+ * ACES maps this value close to white anyway, so normal highlights are unaffected.
+ */
+const MAX_SAMPLE_LUMINANCE = 10
+/** GPU memory the material textures of the path tracer may use (all share one size in an array). */
+const TEXTURE_BUDGET_BYTES = 384 * 1024 * 1024
+/** Edge-preserving denoise of the finished image (glslSmartDeNoise), conservative so fine textures stay sharp. */
+const DENOISE = { sigma: 2, kSigma: 2, threshold: 0.05 }
+/** Time between saved states of a running photo: what a browser restart can lose at most. */
+const CHECKPOINT_INTERVAL_MS = 60_000
 
 /** Tile grid for the desired pixels per tile, roughly square tiles. */
 function tileGrid(width: number, height: number, tilePixels: number): [number, number] {
@@ -117,7 +136,7 @@ function groupParts(geometry: BufferGeometry, materials: Material[], cache: Map<
   })
 }
 
-type IndoorUniforms = typeof indoorUniforms
+export type IndoorUniforms = typeof indoorUniforms
 
 /**
  * Copy of the indoor light maps. The live maps are rewritten in place whenever the sun moves, a
@@ -328,6 +347,84 @@ function adaptationImage(renderer: WebGLRenderer, scene: ThreeScene, camera: Cam
   return target
 }
 
+/**
+ * Edge length of the material texture array. The path tracer scales every texture to this one size
+ * (1024 by default), which makes large textures like aerial photos or floors blurry and blocky in
+ * Full HD and 4K. Uses the largest size that the textures need and the GPU and memory budget allow.
+ */
+function textureArraySize(scene: ThreeScene, renderer: WebGLRenderer, width: number): number {
+  const sources = new Map<unknown, number>()
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh)) return
+    for (const material of [object.material as Material | Material[]].flat()) {
+      for (const value of Object.values(material)) {
+        const texture = value as Texture | null
+        if (!texture?.isTexture) continue
+        const image = texture.image as { width?: number; height?: number } | null
+        sources.set(texture.source, Math.max(image?.width ?? 0, image?.height ?? 0))
+      }
+    }
+  })
+  const largest = Math.max(0, ...sources.values())
+  // More than the photo width can never show more detail
+  const limit = Math.min(renderer.capabilities.maxTextureSize, width >= 3000 ? 4096 : 2048)
+  let size = 1024
+  for (const candidate of [2048, 4096]) {
+    if (candidate > limit || candidate / 2 >= largest) break
+    if (sources.size * candidate * candidate * 4 > TEXTURE_BUDGET_BYTES) break
+    size = candidate
+  }
+  return size
+}
+
+/**
+ * Per-sample luminance clamp against fireflies, see {@link MAX_SAMPLE_LUMINANCE}. Uniform instead
+ * of a define, so the path tracer still compiles only once.
+ */
+function clampFireflies(material: ShaderMaterial, maxLuminance: number) {
+  const end = 'gl_FragColor.a *= opacity;'
+  if (material.fragmentShader.split(end).length !== 2) {
+    console.warn('Pathtracer shader: end of the path not found as expected, fireflies stay unclamped')
+    return
+  }
+  material.uniforms.maxSampleLuminance = { value: maxLuminance }
+  material.fragmentShader = `uniform float maxSampleLuminance;\n${material.fragmentShader.replace(
+    end,
+    `{
+						float sampleLuminance = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+						if ( sampleLuminance > maxSampleLuminance ) gl_FragColor.rgb *= maxSampleLuminance / sampleLuminance;
+					}
+					${end}`,
+  )}`
+}
+
+/**
+ * Removes the remaining noise of the finished image with an edge-preserving filter. Works on the
+ * final 8-bit image in the canvas (after tone mapping and adaptation), in sRGB values, where the
+ * threshold matches how visible differences are.
+ */
+function denoiseCanvas(renderer: WebGLRenderer, width: number, height: number) {
+  const pixels = new Uint8Array(width * height * 4)
+  const gl = renderer.getContext()
+  renderer.setRenderTarget(null)
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+  // Rows from the bottom as read, which matches the texture coordinates of the quad
+  const image = new DataTexture(pixels, width, height, RGBAFormat, UnsignedByteType)
+  image.colorSpace = LinearSRGBColorSpace
+  image.needsUpdate = true
+  const material = new DenoiseMaterial({ map: image, ...DENOISE })
+  material.toneMapped = false
+  const quad = new FullScreenQuad(material)
+  // Values are already sRGB: write them through unchanged
+  const outputColorSpace = renderer.outputColorSpace
+  renderer.outputColorSpace = LinearSRGBColorSpace
+  quad.render(renderer)
+  renderer.outputColorSpace = outputColorSpace
+  quad.dispose()
+  material.dispose()
+  image.dispose()
+}
+
 /** Makes the path tracer output multiply every pixel with the adaptation image before tone mapping. */
 function applyAdaptation(output: ShaderMaterial, adaptation: WebGLRenderTarget) {
   output.uniforms.adaptationMap = { value: adaptation.texture }
@@ -337,21 +434,71 @@ function applyAdaptation(output: ShaderMaterial, adaptation: WebGLRenderTarget) 
   output.needsUpdate = true
 }
 
-/** Runs {@code step} once per animation frame, or as soon as possible while the tab is hidden (no frames there). */
+/** Without an animation frame for this long, the step runs anyway (compositor stopped sending frames). */
+const FRAME_FALLBACK_MS = 500
+
+/**
+ * Runs a task as soon as possible via a message event. Unlike setTimeout, message events are not
+ * throttled in hidden pages (Chrome allows only one timer wake-up per second there, after five
+ * minutes one per minute), so rendering keeps its pace while the screen is locked.
+ */
+function postTask(task: () => void): () => void {
+  const channel = new MessageChannel()
+  channel.port1.onmessage = () => {
+    channel.port1.close()
+    task()
+  }
+  channel.port2.postMessage(null)
+  return () => channel.port1.close()
+}
+
+/**
+ * Runs {@code step} once per animation frame, or as soon as possible while the tab is hidden (no
+ * frames there). If no frame arrives although the page counts as visible (e.g. a locked screen on
+ * some Linux compositors), the step runs after {@link FRAME_FALLBACK_MS} anyway.
+ */
 function schedule(step: () => void): () => void {
-  let frame = 0
-  let timer = 0
-  if (document.hidden) timer = window.setTimeout(step, 0)
-  else frame = requestAnimationFrame(step)
-  return () => {
+  if (document.hidden) return postTask(step)
+  let ran = false
+  let cancelTask = () => {}
+  const run = () => {
+    if (ran) return
+    ran = true
     cancelAnimationFrame(frame)
     window.clearTimeout(timer)
+    step()
   }
+  const frame = requestAnimationFrame(run)
+  // A single timer per step is enough here; it only fires when frames have stopped
+  const timer = window.setTimeout(() => (cancelTask = postTask(run)), FRAME_FALLBACK_MS)
+  return () => {
+    ran = true
+    cancelAnimationFrame(frame)
+    window.clearTimeout(timer)
+    cancelTask()
+  }
+}
+
+/** Controls of a running photo, see {@link renderPhoto}. */
+export interface PhotoRun {
+  /** Ends rendering early and finishes the current image (denoise); the canvas then keeps it. */
+  finish: () => void
+  /** Stops rendering and frees the GPU resources. */
+  stop: () => void
+}
+
+/** State of a running photo after a full pass; rendering can continue from it. */
+export interface PhotoCheckpoint {
+  samples: number
+  /** Float RGBA values of the accumulated image, width × height × 4. */
+  pixels: Float32Array
 }
 
 export interface PhotoCallbacks {
   onState: (state: 'rendering') => void
   onProgress: (samples: number) => void
+  /** No further checkpoint is taken until the returned promise has settled. */
+  onCheckpoint: (checkpoint: PhotoCheckpoint) => Promise<void>
   onDone: () => void
   onError: () => void
 }
@@ -359,9 +506,19 @@ export interface PhotoCallbacks {
 /**
  * Photorealistic still image of a snapshot by path tracing: light is traced physically (indirect
  * light, soft shadows, reflections, glass); the image gets less noisy with every pass. Renders
- * into {@code canvas} and returns a function that stops rendering and frees the GPU resources.
+ * into {@code canvas}; with {@code denoise} the remaining noise is filtered out at the end.
+ * Continues from {@code resume} if given, on graphics hardware that allows it.
  */
-export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, width: number, height: number, maxSamples: number, callbacks: PhotoCallbacks): () => void {
+export function renderPhoto(
+  snapshot: PhotoSnapshot,
+  canvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+  maxSamples: number,
+  denoise: boolean,
+  callbacks: PhotoCallbacks,
+  resume: PhotoCheckpoint | null = null,
+): PhotoRun {
   const renderer = new WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true })
   renderer.setPixelRatio(1)
   renderer.setSize(width, height, false)
@@ -379,13 +536,16 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
   // Missing from the library's types
   const internals = tracer as unknown as {
     isCompiling: boolean
-    _pathTracer: { material: ShaderMaterial & { onBeforeRender: () => void } }
+    _pathTracer: { alpha: boolean; samples: number; material: ShaderMaterial & { onBeforeRender: () => void; seed: number } }
     _quad: { material: ShaderMaterial }
   }
   const adaptation = snapshot.indoor ? adaptationImage(renderer, scene, camera, snapshot.indoor, width, height) : null
   if (adaptation) applyAdaptation(internals._quad.material, adaptation)
   // Smaller shader that compiles fast enough on weak graphics too
   slimPathTracerShader(internals._pathTracer.material, scene)
+  clampFireflies(internals._pathTracer.material, MAX_SAMPLE_LUMINANCE / Math.max(snapshot.exposure, 1e-3))
+  const textureSize = textureArraySize(scene, renderer, width)
+  tracer.textureSize.set(textureSize, textureSize)
   tracer.bounces = 5
   tracer.transmissiveBounces = 4
   // Fewer specular fireflies on rough reflections
@@ -403,6 +563,14 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
   tracer.setBVHWorker(worker)
   let cancelStep = () => {}
   let stopped = false
+  let finished = false
+  let rendered = false
+  const finish = () => {
+    if (stopped || finished) return
+    finished = true
+    cancelStep()
+    if (denoise && rendered) denoiseCanvas(renderer, width, height)
+  }
   const stop = () => {
     if (stopped) return
     stopped = true
@@ -426,15 +594,47 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
     .then(() => {
       if (stopped) return
       compileOnce(internals._pathTracer.material)
+      // Without float blending the library alternates between two targets: nothing to continue from
+      const resumed = resume && renderer.extensions.has('EXT_float_blend') ? resume : null
+      if (resumed) {
+        // Lets the library set the size and do its pending reset, which would wipe the restored image
+        tracer.pausePathTracing = true
+        tracer.renderSample()
+        tracer.pausePathTracing = false
+        const image = new DataTexture(resumed.pixels, width, height, RGBAFormat, FloatType)
+        renderer.copyTextureToTexture(image, tracer.target.texture)
+        image.dispose()
+        // The next pass is blended in with weight 1 / (samples + 1); its noise is a new one
+        internals._pathTracer.samples = resumed.samples
+        internals._pathTracer.material.seed = resumed.samples
+      }
+      callbacks.onProgress(resumed?.samples ?? 0)
       callbacks.onState('rendering')
       // Reading back one pixel waits until the GPU has finished the tile, which measures its time
       const pixel = new Float32Array(4)
       let spent = 0 // measured time and pixels in the current pass
       let measured = 0
       let warmedUp = false
-      let previous = 0
+      let previous = resumed?.samples ?? 0
+      let lastCheckpoint = performance.now()
+      let savingCheckpoint = false
+      /** Only between two passes: every pixel has then been sampled equally often. */
+      const saveCheckpoint = (samples: number) => {
+        savingCheckpoint = true
+        // The read-back delays the next tile, which must not make the tiles smaller
+        warmedUp = false
+        const pixels = new Float32Array(width * height * 4)
+        renderer
+          .readRenderTargetPixelsAsync(tracer.target, 0, 0, width, height, pixels)
+          .then(() => (stopped || finished ? undefined : callbacks.onCheckpoint({ samples, pixels })))
+          .catch((error: unknown) => console.warn('Photo: progress could not be saved', error))
+          .finally(() => {
+            savingCheckpoint = false
+            lastCheckpoint = performance.now()
+          })
+      }
       const loop = () => {
-        if (stopped) return
+        if (stopped || finished) return
         // The shader is still compiling: do not wait for the GPU, the page would hang
         if (internals.isCompiling) {
           cancelStep = schedule(loop)
@@ -447,6 +647,7 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
           const tilePixels = (width / tracer.tiles.x) * (height / tracer.tiles.y)
           const tileStart = performance.now()
           tracer.renderSample()
+          rendered = true
           renderer.readRenderTargetPixels(tracer.target, 0, 0, 1, 1, pixel)
           // The first tile includes uploading the scene and does not count
           if (warmedUp) {
@@ -461,11 +662,16 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
             tracer.tiles.set(...tileGrid(width, height, Math.min((TILE_BUDGET_MS * measured) / spent, tilePixels * 4)))
             spent = measured = 0
           }
-          if (done > previous) callbacks.onProgress(done)
+          if (done > previous) {
+            callbacks.onProgress(done)
+            const due = !savingCheckpoint && performance.now() - lastCheckpoint >= CHECKPOINT_INTERVAL_MS
+            if (due && done < maxSamples && !internals._pathTracer.alpha) saveCheckpoint(done)
+          }
           previous = done
         } while (done < maxSamples && !stopped && performance.now() - frameStart < budget)
         if (stopped) return
         if (done >= maxSamples) {
+          finish()
           callbacks.onDone()
           return
         }
@@ -478,5 +684,5 @@ export function renderPhoto(snapshot: PhotoSnapshot, canvas: HTMLCanvasElement, 
       stop()
       callbacks.onError()
     })
-  return stop
+  return { finish, stop }
 }

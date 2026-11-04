@@ -155,8 +155,33 @@ export function slimPathTracerShader(material: ShaderMaterial, scene: Object3D) 
     )
   }
   source = hideMatteFromCamera(source)
+  widenRandomTable(material)
   // Ohne needsUpdate: Das würde beim Pathtracer sofort eine Kompilierung starten
   material.fragmentShader = source
+}
+
+/**
+ * Number of random dimensions per bounce the shader reads: the library uses rand(0) to rand(16),
+ * hideMatteFromCamera adds rand(17) and rand(18).
+ */
+const RANDOM_DIMENSIONS = 19
+
+/**
+ * The library sizes its table of stratified random numbers by `bounces + transmissiveBounces + 5`
+ * columns, one per random dimension. With few bounces it is narrower than the dimensions the shader
+ * reads (e.g. 14 for 5 + 4 bounces); reads beyond it return a constant, so the BSDF lobe choice,
+ * sample directions and the passage through hidden ceilings become a fixed value per pixel. That
+ * noise never averages out, however many samples are taken. Keeps the table wide enough.
+ */
+function widenRandomTable(material: ShaderMaterial) {
+  const table = (material as ShaderMaterial & { stratifiedTexture?: { init: (count?: number, depth?: number, strata?: number) => void } })
+    .stratifiedTexture
+  if (!table) {
+    console.warn('Pathtracer shader: random number table not found, sampling may stay noisy')
+    return
+  }
+  const init = table.init.bind(table)
+  table.init = (count, depth, strata) => init(count, Math.max(depth ?? 0, RANDOM_DIMENSIONS), strata)
 }
 
 /** Höchstzahl unsichtbarer Flächen, durch die ein Strahl hindurchgeht (begrenzt die Schleife). */

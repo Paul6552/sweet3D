@@ -16,10 +16,10 @@ import Popover from '@mui/material/Popover'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PhotoDialog } from '../view3d/PhotoDialog'
-import { clearFinished, downloadJob, isPending, jobLabel, jobProgress, openPhotoDialog, removeJob, type RenderJob, stopJob, useRenderQueue } from '../view3d/renderQueue'
+import { clearFinished, downloadJob, isPending, jobLabel, jobProgress, openPhotoDialog, removeJob, type RenderJob, startRenderQueue, stopJob, useRenderQueue } from '../view3d/renderQueue'
 
 /** Percentage of a job as a ring with the number inside. */
 function JobProgress({ job }: { job: RenderJob }) {
@@ -55,6 +55,7 @@ export function RenderQueueMenu() {
   const sceneAvailable = useRenderQueue((s) => s.sceneAvailable)
   const pending = jobs.filter(isPending).length
   const running = jobs.find((j) => j.state === 'preparing' || j.state === 'rendering')
+  useEffect(startRenderQueue, [])
 
   const open = (id: string | null) => {
     setAnchor(null)

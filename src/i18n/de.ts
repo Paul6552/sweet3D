@@ -326,6 +326,8 @@ export const de = {
     draft: 'Entwurf (schnell)',
     good: 'Gut',
     best: 'Beste (langsam)',
+    max: 'Maximal (sehr langsam)',
+    denoise: 'Rauschen entfernen',
     hint: 'Berechnet ein fotorealistisches Bild der aktuellen Ansicht mit Pathtracing. Je nach Grafikkarte dauert das einige Sekunden bis Minuten.',
     preparing: 'Bereite Szene vor …',
     progress: 'Durchgang {{samples}} von {{total}}',
@@ -355,6 +357,7 @@ export const de = {
     remove: 'Entfernen',
     clearFinished: 'Fertige entfernen',
     locked: 'Das Modell ist gesperrt, solange Renderings offen sind. Kamera und Sonnenstand lassen sich weiter ändern.',
+    notSaved: 'Ein Rendering konnte nicht im Browser gespeichert werden, vielleicht ist der Speicher voll. Es läuft weiter, geht aber beim Schließen des Browsers verloren.',
     states: {
       queued: 'Wartet',
       preparing: 'Wird vorbereitet',

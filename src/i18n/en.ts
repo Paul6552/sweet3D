@@ -328,6 +328,8 @@ export const en: Resources = {
     draft: 'Draft (fast)',
     good: 'Good',
     best: 'Best (slow)',
+    max: 'Maximum (very slow)',
+    denoise: 'Remove noise',
     hint: 'Computes a photorealistic image of the current view by path tracing. Depending on your graphics card this takes a few seconds to minutes.',
     preparing: 'Preparing scene …',
     progress: 'Pass {{samples}} of {{total}}',
@@ -357,6 +359,7 @@ export const en: Resources = {
     remove: 'Remove',
     clearFinished: 'Remove finished',
     locked: 'The model is locked while renderings are pending. Camera and sun position can still be changed.',
+    notSaved: 'A rendering could not be stored in the browser, storage may be full. It keeps running but will be lost when the browser closes.',
     states: {
       queued: 'Waiting',
       preparing: 'Preparing',

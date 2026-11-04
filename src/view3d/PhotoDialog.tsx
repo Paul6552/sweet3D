@@ -2,10 +2,12 @@ import Minimize from '@mui/icons-material/Minimize'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Checkbox from '@mui/material/Checkbox'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import FormControlLabel from '@mui/material/FormControlLabel'
 import LinearProgress from '@mui/material/LinearProgress'
 import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
@@ -15,6 +17,40 @@ import { useTranslation } from 'react-i18next'
 import { useBrightRoomsStore } from './brightRooms'
 import { PHOTO_SIZES, QUALITY_KEYS, SAMPLE_OPTIONS } from './photoRender'
 import { closePhotoDialog, downloadJob, enqueuePhoto, isPending, jobLabel, jobProgress, openPhotoDialog, type RenderJob, stopJob, useRenderQueue } from './renderQueue'
+
+interface PhotoSettings {
+  /** Index into PHOTO_SIZES. */
+  size: number
+  maxSamples: number
+  denoise: boolean
+}
+
+const SETTINGS_KEY = 'sweet3d.photoSettings'
+/** Full HD and good quality: sharp enough for most uses without long waits. */
+const DEFAULT_SETTINGS: PhotoSettings = { size: 1, maxSamples: 256, denoise: true }
+
+/** The settings of the last photo, so they do not have to be chosen again after a reload. */
+function loadSettings(): PhotoSettings {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as Partial<PhotoSettings> | null
+    if (!stored) return DEFAULT_SETTINGS
+    return {
+      size: typeof stored.size === 'number' && PHOTO_SIZES[stored.size] ? stored.size : DEFAULT_SETTINGS.size,
+      maxSamples: typeof stored.maxSamples === 'number' && SAMPLE_OPTIONS.includes(stored.maxSamples) ? stored.maxSamples : DEFAULT_SETTINGS.maxSamples,
+      denoise: typeof stored.denoise === 'boolean' ? stored.denoise : DEFAULT_SETTINGS.denoise,
+    }
+  } catch {
+    return DEFAULT_SETTINGS
+  }
+}
+
+function saveSettings(settings: PhotoSettings) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    // Storage blocked (private mode): the settings only last for this session
+  }
+}
 
 /** Progress bar, status text and image of one job. */
 function JobView({ job }: { job: RenderJob }) {
@@ -78,13 +114,18 @@ export function PhotoDialog() {
   const job = useRenderQueue((s) => s.jobs.find((j) => j.id === jobId))
   const sceneAvailable = useRenderQueue((s) => s.sceneAvailable)
   const busy = useRenderQueue((s) => s.jobs.some(isPending))
-  const [size, setSize] = useState(0)
-  const [maxSamples, setMaxSamples] = useState(256)
+  const [settings, setSettings] = useState(loadSettings)
+  const { size, maxSamples, denoise } = settings
+  const change = (part: Partial<PhotoSettings>) => {
+    const next = { ...settings, ...part }
+    setSettings(next)
+    saveSettings(next)
+  }
   // Acts through the scene of the 3D view (see HomeScene); only a notice here
   const brightRooms = useBrightRoomsStore((s) => s.brightRooms)
 
   const enqueue = (show: boolean) => {
-    const id = enqueuePhoto(size, maxSamples)
+    const id = enqueuePhoto(size, maxSamples, denoise)
     if (id && show) openPhotoDialog(id)
     else closePhotoDialog()
   }
@@ -114,20 +155,24 @@ export function PhotoDialog() {
         ) : (
           <>
             <Box sx={{ display: 'flex', gap: 2, mb: 2, mt: 1, flexWrap: 'wrap' }}>
-              <TextField select size="small" label={t('photo.size')} value={size} onChange={(e) => setSize(Number(e.target.value))}>
+              <TextField select size="small" label={t('photo.size')} value={size} onChange={(e) => change({ size: Number(e.target.value) })}>
                 {PHOTO_SIZES.map((s, i) => (
                   <MenuItem key={s.label} value={i}>
                     {`${s.label} (${s.width} × ${s.height})`}
                   </MenuItem>
                 ))}
               </TextField>
-              <TextField select size="small" label={t('photo.quality')} value={maxSamples} onChange={(e) => setMaxSamples(Number(e.target.value))}>
+              <TextField select size="small" label={t('photo.quality')} value={maxSamples} onChange={(e) => change({ maxSamples: Number(e.target.value) })}>
                 {SAMPLE_OPTIONS.map((n, i) => (
                   <MenuItem key={n} value={n}>
                     {t(QUALITY_KEYS[i])}
                   </MenuItem>
                 ))}
               </TextField>
+              <FormControlLabel
+                control={<Checkbox checked={denoise} onChange={(e) => change({ denoise: e.target.checked })} />}
+                label={t('photo.denoise')}
+              />
             </Box>
             {brightRooms && (
               <Alert severity="info" sx={{ mb: 2 }}>
